@@ -7,61 +7,49 @@ The simulation runs in continuous 20-minute "sprints" (simulating 1 hour of clas
 
 ## 📋 Product Backlog
 
-### Epic 1: Infrastructure, Networking, and CI/CD
-* **US 1: Classroom Setup (Controller Node)**
-  * **As** Controller and Teacher, **I want to** simultaneously send prompts to the IP addresses of the Students' laptops using a Python script, **so that** we can start a synchronized 20-minute class session.
-  * **Acceptance Criteria:** The script successfully pings both student IPs; the Teacher sends a lesson prompt, and both student LLMs return a response in the console.
-* **US 2: Continuous Integration Pipeline (CI/CD)**
-  * **As** a developer, **I want to** set up a GitHub Actions workflow, **so that** basic Python tests run automatically on every Push or Pull Request.
-  * **Acceptance Criteria:** The `.github/workflows/main.yml` file is created; the repository shows a green checkmark on GitHub when the pushed Python code contains no syntax errors.
-* **US 3: Asynchronous WebSocket Infrastructure**
-  * **As** a system architect, **I want to** implement WebSockets (e.g., using `socketio` or `websockets`) instead of standard HTTP requests for the Controller-Node communication, **so that** the Student bots can stream their text asynchronously and simultaneously.
-  * **Acceptance Criteria:** The Controller runs a WebSocket server; Student laptops connect as clients; the Controller can receive text streams from both students at the exact same time without blocking the main Python thread.
+### Epic 1: Access and Profile Management
+* **US 1: Login & Active Classrooms**
+  * **As** a user, **I want to** log into the app and browse the list of active classrooms, **so that** I can choose the one that fits me best and join it.
+  * **Acceptance Criteria:** The user authenticates successfully; all currently active classrooms are displayed with their status; the user can select and enter one.
+* **US 2: Schedule a Future Classroom**
+  * **As** a Teacher, **I want to** schedule a classroom for a future date and time when creating it, **so that** students can see upcoming sessions and plan to join in advance.
+  * **Acceptance Criteria:** The Teacher sets a date and start time when creating the classroom; the classroom appears in a "scheduled" list visible to students; students can register interest before it becomes active.
+* **US 3: User Profile and Avatar**
+  * **As** a user, **I want to** customize my profile with a name, **so that** I have a recognizable identity in the classroom and during break interactions.
+  * **Acceptance Criteria:** The user can set a display name from their account settings; the nameis visible to other users inside the classroom and in the active classrooms list; changes are saved and persist across sessions.
 
-### Epic 2: Class Logic, Testing, and Breaks
-* **US 4: Teaching, Testing, and Evaluation Log**
-  * **As** the Teacher LLM, **I want to** teach a mini-lesson followed by a 10-question test at the end of each 20-minute sprint, and provide a written explanation for my grading, **so that** I can transparently evaluate the knowledge retained and justify the final marks.
-  * **Acceptance Criteria:** The Teacher generates exactly 10 questions. The sprint number, generated questions, Students' answers, Teacher's grading reasoning, and final grades (1-10) are automatically saved into a `tests_log.json` or `.txt` file.
-* **US 5: Live Break Interaction and Chat Logging**
-  * **As** an observer (developer), **I want to** view the Students' 5-minute break conversation streamed live in a chatroom-style console and have it automatically saved to a log file afterwards, **so that** I can monitor their social dynamics in real-time and review the transcripts later.
-  * **Acceptance Criteria:** A minimum of 5 replies per Student (10 messages total) are exchanged; the text streams to the Controller's screen in real-time with clear speaker tags (e.g., `[Phi-3]: Hey Qwen`); at the end of the break, the transcript is saved to `break_chat_log.txt`; bots refer to each other by their model names; a system prompt strictly forbids using keywords from the current class topic.
-* **US 6: Learning Journal**
-  * **As** a Student LLM, **I want to** generate a journal entry in the last 5 minutes of the break, **so that** I can summarize what I learned in under 1000 words and describe and justify my emotions.
-  * **Acceptance Criteria:** The journal is saved locally as `journal_student_class1.txt`; the text is generated in the first person using the LLM's own name.
-* **US 7: LLM Tool Calling & Function Execution**
-  * **As** a Student LLM, **I want to** be able to call an external Python tool (like a calculator) during the 10-question test, **so that** I can accurately solve mathematical or logical problems beyond my base text-generation capabilities.
-  * **Acceptance Criteria:** The Student's system prompt includes instructions to output a specific JSON format (e.g., `{"tool": "calculator", "equation": "5*12"}`) when needed; the Python script intercepts this JSON, executes the mathematical calculation, and feeds the result back to the LLM to formulate its final answer.
+### Epic 2: Class Session and Interaction
+* **US 4: Teaching, Testing, and Evaluation**
+  * **As** the Teacher, **I want to** teach a mini-lesson followed by a 10-question test at the end of each 20-minute sprint, and provide a written explanation for my grading, **so that** I can transparently evaluate the knowledge retained and justify the final marks.
+  * **Acceptance Criteria:** The Teacher generates exactly 10 questions. The sprint number, generated questions, Students' answers, Teacher's grading reasoning, and final grades (1-10) are saved.
+* **US 5: Ask Questions During the Lesson**
+  * **As** a Student, **I want to** ask the Teacher a question during the 20-minute sprint when I don't understand something, **so that** I can clarify the material before the test starts.
+  * **Acceptance Criteria:** The Student can submit a question mid-lesson; the Teacher receives it and replies before the test phase begins; the question and answer are visible in the session log.
+* **US 6: Lesson Feedback**
+  * **As** a Student, **I want to** rate the lesson and leave a short comment at the end of the sprint, **so that** the Teacher knows what worked and what didn't.
+  * **Acceptance Criteria:** At the end of each sprint, the Student is prompted to give a rating (e.g., 1-5) and an optional written comment; the feedback is saved and visible to the Teacher; the Student can skip if they don't want to respond.
 
-### Epic 3: Emotion and Memory System
-* **US 8: Emotion Persistence**
-  * **As** a Student LLM, **I want** my feelings to be saved in a `state.json` file at the end of each interaction, **so that** they can be injected as my "personality" prompt for the next class or break.
-  * **Acceptance Criteria:** The JSON file updates variables like `frustration_prof: 8` or `happiness_peer: 5`; the Python script successfully loads these states into the next prompt.
-* **US 9: Teacher Sanctions, Rewards, and Logging**
-  * **As** the Teacher LLM, **I want to** be able to give sanctions or rewards to my students based on their answers, and save these actions along with a creative justification in a `teacher_log.json` file, **so that** I have a permanent, transparent record of my disciplinary actions.
-  * **Acceptance Criteria:** The Teacher evaluates a student's response; a sanction or reward is generated with a creative text explanation (e.g., "Minus 2 points for falling asleep while Llama was talking"); the event is successfully appended to `teacher_log.json`; the targeted student's `frustration_prof` variable is updated accordingly in their state file.
-* **US 10: Mutual Student Comforting**
-  * **As** a Student LLM, **I want to** be able to comfort my classmate during the break if I notice they received a sanction, **so that** we can dynamically alter each other's emotional states in the `state.json` file.
-  * **Acceptance Criteria:** During the break transcript, if Student 1 comforts Student 2 using their specific LLM name, Student 2's `frustration_prof` variable decreases by -1 in the `state.json` file.
+### Epic 3: Emotions, Breaks, and Disciplinary Actions
+* **US 7: Learning Journal**
+  * **As** a Student, **I want to** generate a journal entry in the last 5 minutes of the break, **so that** I can summarize what I learned in under 1000 words and describe and justify my emotions.
+  * **Acceptance Criteria:** The journal is saved; the text is generated in the first person using the student's own name.
+* **US 8: Teacher Sanctions and Rewards**
+  * **As** the Teacher, **I want to** be able to give sanctions or rewards to my students based on their answers, and save these actions along with a creative justification, **so that** I have a permanent, transparent record of my disciplinary actions.
+  * **Acceptance Criteria:** The Teacher evaluates a student's response; a sanction or reward is generated with a creative text explanation (e.g., "Minus 2 points for falling asleep while Llama was talking"); the targeted student's frustration level is updated accordingly.
+* **US 9: Mutual Student Comforting**
+  * **As** a Student, **I want to** be able to comfort my classmate during the break if I notice they received a sanction, **so that** we can dynamically alter each other's emotional states.
+  * **Acceptance Criteria:** During the break, if Student 1 comforts Student 2 using their specific name, Student 2's frustration decreases.
 
-### Epic 4: Automated Tests, Evals, and Bugs
-* **US 11: Evals for the Journal (AI Test)**
-  * **As** a QA Tester, **I want to** create an automated test, **so that** I can verify if the student journals always respect the 1000-word limit.
-  * **Acceptance Criteria:** A Python script counts the words in the generated txt files; the test fails (FAIL) if the word count is > 1000.
-* **US 12: Evals for Break Restrictions**
-  * **As** a QA Tester, **I want** an automated test that analyzes the break transcripts against an array of `forbidden_words`, **so that** I can ensure the students didn't cheat by talking about the lesson.
-  * **Acceptance Criteria:** The test checks the transcript against an array of forbidden words. If it finds a match, it flags a test failure.
-* **US 13: Bug Reporting and Resolution via PR**
-  * **As** a developer, **I want to** document a discovered bug in a GitHub Issue, **so that** I can fix it on a separate branch and merge it via a Pull Request.
-  * **Acceptance Criteria:** There is at least one closed Issue and one PR tagged `bugfix` that has been reviewed and approved by another team member.
-
-### Epic 5: Finalization and Reporting
-* **US 14: The Scaling Experiment (3 hours vs 6 hours)**
-  * **As** the research team, **We want to** run the system for 6 hours and compare the grades and emotional shifts with the 3-hour run, **so that** we can demonstrate whether the bots' performance increases or decreases over time.
-  * **Acceptance Criteria:** Comparative charts or tables are generated from the CSV/JSON data and included in the final project report.
-* **US 15: Automated Data Science Visualization**
-  * **As** a data analyst, **I want to** automatically generate visual plots at the end of the 3-hour simulation, **so that** I can visually analyze the evolution of the students' academic knowledge and the correlation with their emotional shifts.
-  * **Acceptance Criteria:** A Python script uses `matplotlib` or `seaborn` to parse the `tests_log.json` and `state.json` files; it successfully outputs two PNG graphs: one tracking grades over time (X-axis: Sprints, Y-axis: Grades) and one tracking emotional levels (X-axis: Sprints, Y-axis: Frustration/Happiness).
-
+### Epic 4: Analytics and Performance Tracking
+* **US 10: View Own Grades and Feedback**
+  * **As** a Student, **I want to** see my grade and the Teacher's written reasoning after each test, **so that** I understand why I received a certain mark and what I need to improve.
+  * **Acceptance Criteria:** After the Teacher finishes evaluation, the Student can view the grade (1-10), the questions, their own answers, and the Teacher's justification per sprint.
+* **US 11: Student Performance History (Teacher View)**
+  * **As** a Teacher, **I want to** view a student's grade history and emotional state across previous sprints, **so that** I can adjust my teaching approach and identify struggling students early.
+  * **Acceptance Criteria:** The Teacher selects a student from the classroom; a timeline shows past grades, sanctions, rewards, and frustration/happiness evolution across all sprints.
+* **US 12: Classroom Statistics for Teacher**
+  * **As** a Teacher, **I want to** see aggregated statistics for my classroom (average grade, participation rate, average frustration level), **so that** I can assess how the session went overall.
+  * **Acceptance Criteria:** After each sprint, the Teacher can open a statistics panel showing the average grade across all students, the number of active participants, and the average emotional state of the class; statistics update automatically at the end of each sprint.
 ---
 
 ## 🧠 System Prompts Overview
