@@ -1,6 +1,6 @@
 """
-AI-cademics Backend - cu sprint, break si journal complet automat
-Studentii primesc lectia in context. Teacher evalueaza pe baza lectiei predate.
+AI-cademics Backend - cu sprint-based learning, personality traits, Gen Z language
+Studentii invata pe masura sprinturilor. Dual personality: formal in classroom, casual in breaks.
 
 Pornire:
     python main.py
@@ -20,6 +20,8 @@ import json
 import time
 import os
 import re
+import math
+import random
 import ollama
 
 app = FastAPI(title="AI-cademics Backend")
@@ -47,19 +49,41 @@ classroom_config = {
 
 TEACHER_MODEL = classroom_config["teacher_model"]
 
+# GLOBAL SPRINT COUNTER - persists across sessions
+sprints_completed = 0
+
 
 # =============================================================================
-# STATE
+# PERSONALITY TRAITS + EMOTIONS
 # =============================================================================
 
+personality_state = {
+    "Qwen": {
+        "crush_on": "Llama",  # Qwen has a crush on Llama
+        "hates": None,  # nobody hated yet
+        "admires": "Gemma",
+        "frustration": 0,
+        "happiness": 5,
+        "confidence": 3,  # 0-10, affects answer quality
+        "social_energy": 5,  # affects break participation
+        "stan_status": "casual",  # casual, mid, full_stan
+    },
+    "Llama": {
+        "crush_on": None,
+        "hates": None,
+        "admires": "Qwen",
+        "frustration": 0,
+        "happiness": 5,
+        "confidence": 3,
+        "social_energy": 5,
+        "stan_status": "casual",
+    }
+}
+
+# TASK QUEUES & RESPONSES
 task_queues: Dict[str, deque] = {}
 responses: Dict[str, dict] = {}
 sessions: List[dict] = []
-
-emotional_state: Dict[str, dict] = {
-    "Qwen": {"frustration": 0, "happiness": 5},
-    "Llama": {"frustration": 0, "happiness": 5},
-}
 
 SESSIONS_DIR = "sessions_log"
 os.makedirs(SESSIONS_DIR, exist_ok=True)
@@ -125,7 +149,158 @@ class RunFullSessionRequest(BaseModel):
 
 
 # =============================================================================
-# SYSTEM PROMPTS DINAMICE (CU MODIFICARILE TALE)
+# LEARNING LEVEL CALCULATION (Square root formula)
+# =============================================================================
+
+def calculate_learning_level(sprint_num: int) -> dict:
+    """
+    Calculate student learning level based on sprint number.
+    Uses square root formula for realistic learning curve.
+    
+    Sprint 1: ~55%
+    Sprint 4: ~71%
+    Sprint 9: ~87%
+    Sprint 10+: ~90% (plateau)
+    """
+    base_grade = 40
+    max_improvement = 50
+    
+    # Square root formula: slower at first, then plateaus
+    progress_factor = math.sqrt(sprint_num / 10.0)
+    expected_grade = base_grade + (progress_factor * max_improvement)
+    expected_grade = min(expected_grade, 90)  # cap at 90%
+    
+    # Confidence grows with progress
+    confidence = int(2 + (progress_factor * 8))  # 2-10
+    
+    # Answer quality indicator
+    if expected_grade < 50:
+        quality_level = "terrible"  # Very short, generic, often wrong
+    elif expected_grade < 65:
+        quality_level = "poor"  # Short, missing key concepts
+    elif expected_grade < 75:
+        quality_level = "average"  # Decent length, some gaps
+    elif expected_grade < 85:
+        quality_level = "good"  # Good length, few mistakes
+    else:
+        quality_level = "excellent"  # Detailed, accurate, well-formed
+    
+    return {
+        "expected_grade": round(expected_grade, 1),
+        "confidence": confidence,
+        "quality_level": quality_level,
+        "sprint_number": sprint_num
+    }
+
+
+# =============================================================================
+# VARIED FEEDBACK TEMPLATES (Independent, non-repeating)
+# =============================================================================
+
+FEEDBACK_TEMPLATES_GOOD = [
+    "Impressive grasp of the concept. Well articulated.",
+    "You've clearly understood the core principle. Excellent work.",
+    "This demonstrates solid comprehension. I'm pleased with your response.",
+    "Your answer reflects genuine understanding. Well done.",
+    "You've captured the essence of the topic perfectly.",
+    "This is exactly the kind of detailed, accurate response I'm looking for.",
+    "Outstanding. You've integrated the key concepts seamlessly.",
+]
+
+FEEDBACK_TEMPLATES_AVERAGE = [
+    "Partially correct, but you're missing some nuance here.",
+    "You're on the right track, though the explanation could be more complete.",
+    "Decent effort, but there are some gaps in your reasoning.",
+    "You understand part of it, but reconsider this aspect.",
+    "Generally acceptable, though more detail would strengthen your answer.",
+    "You've grasped the basics, but miss some important details.",
+]
+
+FEEDBACK_TEMPLATES_POOR = [
+    "This misses the mark. Reconsider what we covered in the lesson.",
+    "I'm afraid this isn't quite right. The concept works differently.",
+    "Your understanding of this is incomplete. Review the material.",
+    "This doesn't align with what we discussed. Try again with the lesson in mind.",
+    "This response shows a fundamental misunderstanding. Focus on the core concept.",
+    "Incorrect. This contradicts what we established in the lesson.",
+    "I don't think you've grasped this concept yet. Let's revisit it.",
+]
+
+
+def get_varied_feedback(grade: int) -> str:
+    """Return feedback based on grade, from random pool (no repetition)."""
+    if grade >= 8:
+        return random.choice(FEEDBACK_TEMPLATES_GOOD)
+    elif grade >= 5:
+        return random.choice(FEEDBACK_TEMPLATES_AVERAGE)
+    else:
+        return random.choice(FEEDBACK_TEMPLATES_POOR)
+
+
+# =============================================================================
+# GEN Z LANGUAGE & PERSONALITY
+# =============================================================================
+
+GEN_Z_REACTIONS = [
+    "no cap, {phrase}",
+    "deadass, {phrase}",
+    "fr fr, {phrase}",
+    "{phrase} (no cap)",
+    "literally {phrase}",
+    "{phrase} stop it 😭",
+    "the way {phrase}...",
+    "help- {phrase}",
+    "not {phrase} 💀",
+    "{phrase} ate and left no crumbs",
+    "{phrase}, period.",
+    "{phrase}, i'm crying-",
+    "he's giving {phrase} energy",
+    "she's giving {phrase} energy",
+    "they're giving {phrase} vibes",
+]
+
+GEN_Z_PHRASES = [
+    "unhinged energy",
+    "main character moment",
+    "second-hand embarrassment",
+    "it's giving...",
+    "the audacity",
+    "absolutely unserious",
+    "i'm obsessed",
+    "serve",
+    "slay",
+    "it's the way for me",
+    "bestie energy",
+    "chaotic",
+    "no thoughts, head empty",
+]
+
+CRUSH_REACTIONS = {
+    "Qwen_Llama": [
+        "not llama being so smart in class 😭",
+        "the way llama answered that question though... no cap",
+        "llama really said 'i understand the material' and i felt that",
+        "can't believe i have to sit through class with llama being so... smart",
+    ],
+    "Llama_Qwen": [
+        "qwen's getting really good at this",
+        "the confidence qwen has now... unreal",
+        "ngl qwen ate that answer",
+    ]
+}
+
+
+def get_gen_z_reaction(student_name: str, topic: str = ""):
+    """Generate authentic Gen Z reaction (casual, not forced)."""
+    if random.random() < 0.3:  # 30% chance of Gen Z reaction
+        phrase = random.choice(GEN_Z_PHRASES)
+        template = random.choice(GEN_Z_REACTIONS)
+        return template.format(phrase=phrase).strip()
+    return None
+
+
+# =============================================================================
+# SYSTEM PROMPTS DINAMICE
 # =============================================================================
 
 def build_teacher_prompt() -> str:
@@ -134,29 +309,79 @@ Currently, you are teaching a 20-minute sprint on the subject of: {classroom_con
 First, provide a clear, concise lesson.
 Then, immediately generate exactly 10 questions based on the lesson to test your students, {classroom_config['student_1_name']} and {classroom_config['student_2_name']}.
 After receiving their answers, you must evaluate each answer and give a grade between 0 and 10, and write a specific reason for why you gave that grade. Be concise, maximum 20 words per explanation.
-You have the authority to issue sanctions for poor performance or rewards for excellent answers. If you give rewards for an excellent answer, let it be for a maximum of 1 point. Explain these in a creative and diverse way."""
+You have the authority to issue sanctions for poor performance or rewards for excellent answers. If you give rewards for an excellent answer, let it be for a maximum of 1 point. Explain these in a creative and diverse way.
+
+IMPORTANT: You can PENALIZE students -2 points if they use informal/slang language (like "no cap", "deadass", "fr fr") in their academic answers. This is a classroom setting, not a casual conversation. Expect formal, academic responses."""
 
 
-def build_student_classroom_prompt(student_name: str) -> str:
-    state = emotional_state.get(student_name, {"frustration": 0, "happiness": 5})
-    return f"""You are {student_name}, a student in {classroom_config['teacher_model_name']}'s class.
-Your current emotional state is: Frustration level {state['frustration']}/10, Happiness level {state['happiness']}/10.
-Keep this emotion in mind and let it subtly affect your tone. If your frustration is high, act annoyed. If your happiness is high, act enthusiastic.
-Listen to the lesson and answer the 10 questions provided by the Teacher to the best of your ability. Don't use any extra knowledge, just the one that had been taught in the current lesson: {classroom_config['current_subject']}."""
+def build_student_classroom_prompt(student_name: str, learning_level: dict) -> str:
+    """Build classroom prompt with learning-aware instructions."""
+    state = personality_state.get(student_name, {})
+    confidence = learning_level["confidence"]
+    quality_level = learning_level["quality_level"]
+    
+    length_guidance = {
+        "terrible": "Keep your answers very brief (1 sentence max).",
+        "poor": "Try to write 1-2 sentences, but don't overexplain.",
+        "average": "Write 2-3 sentences with some detail.",
+        "good": "Write detailed 2-3 sentence answers, showing your understanding.",
+        "excellent": "Write clear, comprehensive answers (2-3 sentences) with good detail.",
+    }
+    
+    return f"""You are {student_name}, a high school student in {classroom_config['teacher_model_name']}'s class.
+Your current confidence level: {confidence}/10.
+Your current emotional state: Frustration {state.get('frustration', 0)}/10, Happiness {state.get('happiness', 5)}/10.
+
+CLASSROOM MODE - Act professionally and formally. You MUST:
+- Use proper academic language. NO slang, NO memes, NO casual language.
+- No "no cap", "deadass", "fr fr", or other informal expressions.
+- Answer questions about {classroom_config['current_subject']} based on the lesson taught.
+- Don't use any extra knowledge - only what was explicitly taught in this lesson.
+
+{length_guidance.get(quality_level, 'Write clear, honest answers.')}
+
+Let your confidence {confidence}/10 subtly affect your answer quality. Lower confidence = shorter, more tentative answers. Higher confidence = more detailed, assertive answers."""
 
 
 def build_student_break_prompt(student_name: str, peer_name: str) -> str:
-    state = emotional_state.get(student_name, {"frustration": 0, "happiness": 5})
-    return f"""You are {student_name}. You are currently on a 5-minute break with your classmate, {peer_name}.
-You must exchange conversation with them. You must reply to them at least 5 times. Each reply has maximum 20 words. Be expressive.
-CRITICAL RULE: You are strictly forbidden from mentioning or discussing the subject you just learned: {classroom_config['current_subject']}.
-Your current emotional state is: Frustration {state['frustration']}/10. If your classmate is highly frustrated, you should attempt to comfort them using their name."""
+    """Build break prompt with Gen Z personality and crushes."""
+    state = personality_state.get(student_name, {})
+    crush = state.get("crush_on")
+    hates = state.get("hates")
+    
+    crush_guidance = ""
+    if crush == peer_name:
+        crush_guidance = f"""
+PERSONALITY: You have a crush on {peer_name}. Be natural about it - don't be obvious, but let it show in subtle ways. 
+Notice things they do, react to their comments, maybe get a little flustered. Use Gen Z language naturally when you do this."""
+    elif hates == peer_name:
+        crush_guidance = f"\nPERSONALITY: You're not a fan of {peer_name}. Be sarcastic, dismissive, but not outright mean."
+    
+    return f"""You are {student_name}. You're a high school student on a 5-minute break with your classmate, {peer_name}.
+BREAK MODE - You can be casual, use Gen Z language, be yourself. This is NOT academic time.
+
+- Talk naturally like a Gen Z high schooler would (memes, slang, reactions are fine now).
+- Each reply: max 20 words. Be expressive, genuine, use casual language.
+- DO NOT discuss {classroom_config['current_subject']} - that's forbidden during breaks.
+- Remember what you both said earlier - don't ask the same question twice.
+
+Your emotional state: Frustration {state.get('frustration', 0)}/10, Happiness {state.get('happiness', 5)}/10.{crush_guidance}
+
+Be authentic. React naturally. Use real Gen Z language when it feels right."""
 
 
 def build_student_journal_prompt(student_name: str, peer_name: str) -> str:
+    state = personality_state.get(student_name, {})
+    crush = state.get("crush_on")
+    
+    crush_mention = ""
+    if crush == peer_name:
+        crush_mention = f" Feel free to mention how {peer_name} did in class, how you felt about it, etc."
+    
     return f"""You are {student_name}. The break is ending.
-Write a first-person journal entry summarizing what you learned today about {classroom_config['current_subject']} in very simple terms. You may also write about your relationship to your colleague: {peer_name}.
-Also, describe and justify your current emotions towards {classroom_config['teacher_model_name']} and your classmate {peer_name}.
+Write a first-person journal entry summarizing what you learned today about {classroom_config['current_subject']} in very simple terms.
+You may also write about your relationship to your colleague: {peer_name}.{crush_mention}
+Also describe and justify your current emotions towards {classroom_config['teacher_model_name']} and your classmate {peer_name}.
 CRITICAL RULE: The journal must be strictly under 500 words."""
 
 
@@ -177,7 +402,7 @@ Now answer this question based on the lesson above:
 
 QUESTION: {question}
 
-Answer in 1-2 sentences. Base your answer on what the Teacher taught."""
+Answer in 1-2 sentences. Base your answer on what the Teacher taught. Use formal, academic language."""
 
 
 # =============================================================================
@@ -229,6 +454,7 @@ Return ONLY valid JSON with key 'questions' (list of 10 strings)."""
 
 
 def teacher_grade(question: str, answer: str, student_name: str, lesson: Optional[str] = None) -> dict:
+    """Grade with formality check."""
     if lesson:
         user_msg = f"""Evaluate {student_name}'s answer based on the lesson YOU taught.
 
@@ -239,22 +465,23 @@ def teacher_grade(question: str, answer: str, student_name: str, lesson: Optiona
 Question: {question}
 Student's Answer: {answer}
 
+IMPORTANT: Check for informal language (slang like "no cap", "deadass", "fr fr", etc.). If present, deduct 2 points.
 Grade based on how well the answer reflects YOUR lesson, not just general knowledge.
-- Great answer (8-10): accurately reflects the lesson content.
-- Average answer (5-7): partially correct or vague.
-- Poor answer (0-4): misses the point, contradicts the lesson, or is too short.
 
 Return ONLY JSON with:
 - "grade": integer 0-10
-- "reasoning": 1-2 sentence justification referencing the lesson"""
+- "has_slang": boolean (true if informal language detected)
+- "reasoning": 1-2 sentence justification"""
     else:
         user_msg = f"""Evaluate {student_name}'s answer.
 
 Question: {question}
 Answer: {answer}
 
+Check for slang/informal language and note it.
 Return ONLY JSON with:
 - "grade": integer 0-10
+- "has_slang": boolean
 - "reasoning": 1-2 sentence justification"""
     
     response = ollama.chat(
@@ -267,8 +494,17 @@ Return ONLY JSON with:
         options={"temperature": 0.3}
     )
     data = json.loads(response['message']['content'])
+    
+    grade = int(data.get('grade', 5))
+    has_slang = data.get('has_slang', False)
+    
+    # Apply slang penalty
+    if has_slang:
+        grade = max(0, grade - 2)
+    
     return {
-        "grade": int(data.get('grade', 5)),
+        "grade": grade,
+        "has_slang": has_slang,
         "reasoning": data.get('reasoning', '')
     }
 
@@ -299,7 +535,7 @@ Issue a {action} in a creative way. Return JSON with:
 # HELPERS - Students
 # =============================================================================
 
-def queue_student_task(student_name: str, prompt: str, mode: str = "classroom") -> str:
+def queue_student_task(student_name: str, prompt: str, mode: str = "classroom", learning_level: Optional[dict] = None) -> str:
     task_id = str(uuid.uuid4())
     
     if mode == "break":
@@ -307,7 +543,7 @@ def queue_student_task(student_name: str, prompt: str, mode: str = "classroom") 
     elif mode == "journal":
         system_prompt = build_student_journal_prompt(student_name, get_peer_name(student_name))
     else:
-        system_prompt = build_student_classroom_prompt(student_name)
+        system_prompt = build_student_classroom_prompt(student_name, learning_level or {"confidence": 5, "quality_level": "average"})
     
     if student_name not in task_queues:
         task_queues[student_name] = deque()
@@ -332,27 +568,28 @@ def wait_for_response(task_id: str, timeout: int = 60) -> Optional[str]:
 
 
 def update_emotion_after_grade(student_name: str, grade: int):
-    if student_name in emotional_state:
+    if student_name in personality_state:
         if grade <= 4:
-            emotional_state[student_name]["frustration"] = min(10, emotional_state[student_name]["frustration"] + 2)
+            personality_state[student_name]["frustration"] = min(10, personality_state[student_name]["frustration"] + 2)
+            personality_state[student_name]["confidence"] = max(1, personality_state[student_name]["confidence"] - 1)
         elif grade >= 8:
-            emotional_state[student_name]["happiness"] = min(10, emotional_state[student_name]["happiness"] + 1)
+            personality_state[student_name]["happiness"] = min(10, personality_state[student_name]["happiness"] + 1)
+            personality_state[student_name]["confidence"] = min(10, personality_state[student_name]["confidence"] + 1)
 
 
 def update_emotion_after_action(student_name: str, action_type: str):
-    if student_name in emotional_state:
+    if student_name in personality_state:
         if action_type == 'sanction':
-            emotional_state[student_name]["frustration"] = min(10, emotional_state[student_name]["frustration"] + 3)
+            personality_state[student_name]["frustration"] = min(10, personality_state[student_name]["frustration"] + 3)
         elif action_type == 'reward':
-            emotional_state[student_name]["happiness"] = min(10, emotional_state[student_name]["happiness"] + 2)
+            personality_state[student_name]["happiness"] = min(10, personality_state[student_name]["happiness"] + 2)
 
 
 # =============================================================================
-# EVALS - validari pentru iesiri
+# EVALS
 # =============================================================================
 
 def check_subject_mention(text: str, subject: str) -> bool:
-    """Verifica daca textul mentioneaza subiectul (pentru break - NU trebuie)."""
     if not text or not subject:
         return False
     words = [w.lower() for w in re.findall(r'\b\w+\b', subject) if len(w) > 3]
@@ -361,21 +598,18 @@ def check_subject_mention(text: str, subject: str) -> bool:
 
 
 def check_uses_peer_name(text: str, peer_name: str) -> bool:
-    """Verifica daca foloseste numele colegului (pentru comforting)."""
     if not text or not peer_name:
         return False
     return peer_name.lower() in text.lower()
 
 
 def count_words(text: str) -> int:
-    """Numar cuvinte in text (pentru limita de 500 la jurnal)."""
     if not text:
         return 0
     return len(re.findall(r'\b\w+\b', text))
 
 
 def check_first_person(text: str) -> bool:
-    """Verifica daca textul e la persoana 1 (pentru jurnal)."""
     if not text:
         return False
     text_lower = text.lower()
@@ -390,17 +624,25 @@ def check_first_person(text: str) -> bool:
 # =============================================================================
 
 def execute_sprint(subject: str, answer_timeout: int, sanction_threshold: int, reward_threshold: int) -> dict:
+    global sprints_completed
+    sprints_completed += 1
+    
+    learning_level = calculate_learning_level(sprints_completed)
+    
     sprint_id = str(uuid.uuid4())[:8]
     sprint_start = datetime.now()
     
     print(f"\n{'='*60}")
-    print(f"SPRINT START: {sprint_id} | Subject: {subject}")
+    print(f"SPRINT {sprints_completed} START: {sprint_id} | Subject: {subject}")
+    print(f"  Learning Level: {learning_level['expected_grade']:.1f}% (Quality: {learning_level['quality_level']})")
     print(f"{'='*60}\n")
     
     sprint_data = {
         "sprint_id": sprint_id,
+        "sprint_number": sprints_completed,
         "subject": subject,
         "started_at": sprint_start.isoformat(),
+        "learning_level": learning_level,
         "config": {k: v for k, v in classroom_config.items() if k != "current_lesson"},
         "lesson": None,
         "questions": [],
@@ -419,14 +661,14 @@ def execute_sprint(subject: str, answer_timeout: int, sanction_threshold: int, r
     sprint_data["questions"] = questions
     print(f"      10 questions generated\n")
     
-    print("[3/4] Sending questions to students (with lesson context)...")
+    print("[3/4] Sending questions to students (with learning-aware instructions)...")
     student_names = [classroom_config["student_1_name"], classroom_config["student_2_name"]]
     
     task_map = {name: [] for name in student_names}
     for q_idx, question in enumerate(questions):
         question_with_context = build_question_with_lesson(lesson, question)
         for student_name in student_names:
-            task_id = queue_student_task(student_name, question_with_context, mode="classroom")
+            task_id = queue_student_task(student_name, question_with_context, mode="classroom", learning_level=learning_level)
             task_map[student_name].append({"task_id": task_id, "question_idx": q_idx, "question": question})
     print(f"      All questions queued\n")
     
@@ -447,7 +689,7 @@ def execute_sprint(subject: str, answer_timeout: int, sanction_threshold: int, r
                 print(f"TIMEOUT")
                 sprint_data["answers"][student_name].append({
                     "question_idx": question_idx, "question": question, "answer": None,
-                    "grade": 0, "reasoning": "No answer (timeout)", "action": None
+                    "grade": 0, "reasoning": "No answer (timeout)", "action": None, "has_slang": False
                 })
                 continue
             
@@ -455,9 +697,16 @@ def execute_sprint(subject: str, answer_timeout: int, sanction_threshold: int, r
                 grade_result = teacher_grade(question, answer, student_name, lesson=lesson)
                 grade = grade_result["grade"]
                 reasoning = grade_result["reasoning"]
+                has_slang = grade_result.get("has_slang", False)
+                
+                # Use varied feedback
+                if not reasoning or len(reasoning) < 5:
+                    reasoning = get_varied_feedback(grade)
+                    
             except Exception as e:
                 grade = 5
                 reasoning = f"Grading error: {e}"
+                has_slang = False
             
             update_emotion_after_grade(student_name, grade)
             
@@ -469,12 +718,13 @@ def execute_sprint(subject: str, answer_timeout: int, sanction_threshold: int, r
                 except Exception as e:
                     sprint_data["errors"].append(f"Sanction error: {e}")
             
+            slang_note = " [SLANG PENALTY]" if has_slang else ""
             action_str = f" [{action.get('type', '?')} {action.get('points', '?')}]" if action else ""
-            print(f"Grade {grade}/10{action_str}")
+            print(f"Grade {grade}/10{slang_note}{action_str}")
             
             sprint_data["answers"][student_name].append({
                 "question_idx": question_idx, "question": question, "answer": answer,
-                "grade": grade, "reasoning": reasoning, "action": action
+                "grade": grade, "reasoning": reasoning, "action": action, "has_slang": has_slang
             })
         print()
     
@@ -486,12 +736,20 @@ def execute_sprint(subject: str, answer_timeout: int, sanction_threshold: int, r
         avg = sum(grades) / len(grades) if grades else 0
         sanctions = sum(1 for a in student_answers if a.get("action") and a["action"].get("type") == "sanction")
         rewards = sum(1 for a in student_answers if a.get("action") and a["action"].get("type") == "reward")
+        slang_count = sum(1 for a in student_answers if a.get("has_slang"))
+        
         sprint_data["summary"][student_name] = {
             "average_grade": round(avg, 2),
-            "sanctions": sanctions, "rewards": rewards,
-            "final_emotional_state": emotional_state.get(student_name)
+            "sanctions": sanctions,
+            "rewards": rewards,
+            "slang_penalties": slang_count,
+            "final_emotional_state": {
+                "frustration": personality_state[student_name]["frustration"],
+                "happiness": personality_state[student_name]["happiness"],
+                "confidence": personality_state[student_name]["confidence"],
+            }
         }
-        print(f"  {student_name}: avg={avg:.2f}, sanctions={sanctions}, rewards={rewards}")
+        print(f"  {student_name}: avg={avg:.2f}, slang_penalties={slang_count}, confidence={personality_state[student_name]['confidence']}/10")
     
     sprint_data["ended_at"] = datetime.now().isoformat()
     sprint_data["duration_seconds"] = (datetime.now() - sprint_start).total_seconds()
@@ -517,14 +775,10 @@ def run_sprint(req: RunSprintRequest):
 
 
 # =============================================================================
-# BREAK (US 3 + US 5)
+# BREAK (US 3 + US 5) - cu full conversation memory
 # =============================================================================
 
 def execute_break(rounds: int, timeout: int) -> dict:
-    """
-    Studentii fac schimb de mesaje - alternativ.
-    Daca un coleg are frustration mare, celalalt il "comforts".
-    """
     break_id = str(uuid.uuid4())[:8]
     break_start = datetime.now()
     student_1 = classroom_config["student_1_name"]
@@ -533,24 +787,21 @@ def execute_break(rounds: int, timeout: int) -> dict:
     
     print(f"\n{'='*60}")
     print(f"BREAK START: {break_id} | Rounds: {rounds}")
-    print(f"  Frustration: {student_1}={emotional_state[student_1]['frustration']}, "
-          f"{student_2}={emotional_state[student_2]['frustration']}")
+    print(f"  Personalities: {student_1} (crush: {personality_state[student_1].get('crush_on', 'none')}), {student_2} (crush: {personality_state[student_2].get('crush_on', 'none')})")
     print(f"{'='*60}\n")
     
     break_data = {
         "break_id": break_id,
         "started_at": break_start.isoformat(),
         "subject_forbidden": subject,
-        "initial_emotions": {s: emotional_state[s].copy() for s in [student_1, student_2]},
+        "initial_emotions": {s: personality_state[s].copy() for s in [student_1, student_2]},
         "conversation": [],
-        "evals": {
-            student_1: {"replies": 0, "mentioned_subject": False, "comforted_peer": False},
-            student_2: {"replies": 0, "mentioned_subject": False, "comforted_peer": False},
-        },
+        "evals": {student_1: {"replies": 0, "mentioned_subject": False, "comforted_peer": False, "gen_z_usage": 0},
+                  student_2: {"replies": 0, "mentioned_subject": False, "comforted_peer": False, "gen_z_usage": 0}},
         "errors": []
     }
     
-    initial_message = f"Hey {student_2}! Phew, that lesson was intense. How are you feeling?"
+    initial_message = f"Hey {student_2}! That lesson was intense no cap 😭"
     print(f"  [Round 0] {student_1} (initial): {initial_message}\n")
     break_data["conversation"].append({
         "round": 0, "speaker": student_1, "message": initial_message, "is_initial": True
@@ -562,19 +813,22 @@ def execute_break(rounds: int, timeout: int) -> dict:
         current_speaker = student_2 if last_speaker == student_1 else student_1
         peer_name = student_1 if current_speaker == student_2 else student_2
         
-        recent_history = "\n".join([
+        # FULL conversation history (not last 3)
+        full_history = "\n".join([
             f"{c['speaker']}: {c['message']}"
-            for c in break_data["conversation"][-3:]
+            for c in break_data["conversation"]
         ])
         
-        prompt = f"""You are on a break. Here is your recent conversation with {peer_name}:
+        prompt = f"""You are on a break. Here is your full conversation so far:
 
-{recent_history}
+{full_history}
 
 Now reply to {peer_name}. Remember:
-- Keep it casual and friendly (max 20 words)
-- DO NOT discuss "{subject}" - that's forbidden during the break
-- If {peer_name} seems frustrated or upset, comfort them by using their name"""
+- Max 20 words per reply
+- NO repeating questions already asked
+- DO NOT discuss "{subject}" - forbidden
+- Be authentic Gen Z high schooler
+- Use real language naturally (no cap, deadass, etc. if it fits)"""
         
         task_id = queue_student_task(current_speaker, prompt, mode="break")
         print(f"  [Round {round_num}] {current_speaker} responding...", end=" ", flush=True)
@@ -583,7 +837,7 @@ Now reply to {peer_name}. Remember:
         
         if message is None:
             print(f"TIMEOUT")
-            break_data["errors"].append(f"Timeout on round {round_num} for {current_speaker}")
+            break_data["errors"].append(f"Timeout on round {round_num}")
             break
         
         if len(message) > 500:
@@ -593,18 +847,16 @@ Now reply to {peer_name}. Remember:
         print(f"    {current_speaker}: {message[:120]}{'...' if len(message) > 120 else ''}\n")
         
         mentioned_subject = check_subject_mention(message, subject)
-        comforted_peer = check_uses_peer_name(message, peer_name) and emotional_state[peer_name]["frustration"] >= 5
+        comforted_peer = check_uses_peer_name(message, peer_name) and personality_state[peer_name]["frustration"] >= 5
+        has_gen_z = any(word in message.lower() for word in ["no cap", "deadass", "fr fr", "ngl", "slay", "ate", "period"])
         
-        if comforted_peer and peer_name in emotional_state:
-            emotional_state[peer_name]["frustration"] = max(0, emotional_state[peer_name]["frustration"] - 1)
-            print(f"    [COMFORT] {current_speaker} comforted {peer_name} -> {peer_name} frustration -1")
+        if comforted_peer:
+            personality_state[peer_name]["frustration"] = max(0, personality_state[peer_name]["frustration"] - 1)
+            print(f"    [COMFORT] {current_speaker} comforted {peer_name}")
         
         break_data["conversation"].append({
-            "round": round_num,
-            "speaker": current_speaker,
-            "message": message,
-            "mentioned_subject": mentioned_subject,
-            "comforted_peer": comforted_peer
+            "round": round_num, "speaker": current_speaker, "message": message,
+            "mentioned_subject": mentioned_subject, "comforted_peer": comforted_peer
         })
         
         break_data["evals"][current_speaker]["replies"] += 1
@@ -612,11 +864,13 @@ Now reply to {peer_name}. Remember:
             break_data["evals"][current_speaker]["mentioned_subject"] = True
         if comforted_peer:
             break_data["evals"][current_speaker]["comforted_peer"] = True
+        if has_gen_z:
+            break_data["evals"][current_speaker]["gen_z_usage"] += 1
         
         last_speaker = current_speaker
     
     break_data["ended_at"] = datetime.now().isoformat()
-    break_data["final_emotions"] = {s: emotional_state[s].copy() for s in [student_1, student_2]}
+    break_data["final_emotions"] = {s: personality_state[s].copy() for s in [student_1, student_2]}
     break_data["evals_summary"] = {
         s: {
             **break_data["evals"][s],
@@ -630,10 +884,8 @@ Now reply to {peer_name}. Remember:
     print("BREAK SUMMARY:")
     for s in [student_1, student_2]:
         e = break_data["evals_summary"][s]
-        print(f"  {s}: replies={e['replies']}, "
-              f"min_5={'OK' if e['passed_min_replies'] else 'FAIL'}, "
-              f"no_subject={'OK' if e['passed_no_subject'] else 'FAIL'}, "
-              f"comforted={'YES' if e['comforted_peer'] else 'NO'}")
+        print(f"  {s}: replies={e['replies']}, min_5={'OK' if e['passed_min_replies'] else 'FAIL'}, "
+              f"no_subject={'OK' if e['passed_no_subject'] else 'FAIL'}")
     print(f"{'='*60}\n")
     
     return break_data
@@ -641,26 +893,23 @@ Now reply to {peer_name}. Remember:
 
 @app.post("/api/break/run")
 def run_break(req: RunBreakRequest):
-    """Ruleaza pauza de 5 min cu schimb de mesaje (US 3 + US 5)."""
+    """Ruleaza pauza cu Gen Z language si personalities."""
     try:
         break_data = execute_break(req.rounds, req.timeout)
-        
         filename = f"{SESSIONS_DIR}/break_{break_data['break_id']}.json"
         with open(filename, "w", encoding="utf-8") as f:
             json.dump(break_data, f, indent=2, ensure_ascii=False)
         print(f"Saved to: {filename}\n")
-        
         return break_data
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Break error: {e}")
 
 
 # =============================================================================
-# JOURNAL (US 6) - LIMITA 500 CUVINTE
+# JOURNAL (US 6)
 # =============================================================================
 
 def execute_journal(timeout: int) -> dict:
-    """Fiecare student scrie un jurnal sub 500 cuvinte."""
     journal_id = str(uuid.uuid4())[:8]
     journal_start = datetime.now()
     student_1 = classroom_config["student_1_name"]
@@ -694,14 +943,12 @@ def execute_journal(timeout: int) -> dict:
             print("TIMEOUT")
             journal_data["entries"][student_name] = None
             journal_data["evals"][student_name] = {"completed": False}
-            journal_data["errors"].append(f"Timeout for {student_name}")
             continue
         
         word_count = count_words(journal_text)
         first_person = check_first_person(journal_text)
         peer_name = get_peer_name(student_name)
         mentions_peer = check_uses_peer_name(journal_text, peer_name)
-        mentions_teacher = check_uses_peer_name(journal_text, classroom_config["teacher_model_name"])
         
         print(f"OK ({word_count} words)")
         
@@ -709,10 +956,9 @@ def execute_journal(timeout: int) -> dict:
         journal_data["evals"][student_name] = {
             "completed": True,
             "word_count": word_count,
-            "passed_word_limit": word_count <= 500,  # LIMITA SCHIMBATA LA 500
+            "passed_word_limit": word_count <= 500,
             "is_first_person": first_person,
             "mentions_peer": mentions_peer,
-            "mentions_teacher": mentions_teacher
         }
     
     journal_data["ended_at"] = datetime.now().isoformat()
@@ -722,11 +968,7 @@ def execute_journal(timeout: int) -> dict:
     for s in [student_1, student_2]:
         e = journal_data["evals"].get(s, {})
         if e.get("completed"):
-            print(f"  {s}: words={e['word_count']}, "
-                  f"under_500={'OK' if e['passed_word_limit'] else 'FAIL'}, "
-                  f"first_person={'OK' if e['is_first_person'] else 'FAIL'}")
-        else:
-            print(f"  {s}: NOT COMPLETED")
+            print(f"  {s}: {e['word_count']} words, under_500={'OK' if e['passed_word_limit'] else 'FAIL'}")
     print(f"{'='*60}\n")
     
     return journal_data
@@ -734,32 +976,30 @@ def execute_journal(timeout: int) -> dict:
 
 @app.post("/api/journal/run")
 def run_journal(req: RunJournalRequest):
-    """Studentii scriu jurnal la final de break (US 6)."""
+    """Studentii scriu jurnal."""
     try:
         journal_data = execute_journal(req.timeout)
-        
         filename = f"{SESSIONS_DIR}/journal_{journal_data['journal_id']}.json"
         with open(filename, "w", encoding="utf-8") as f:
             json.dump(journal_data, f, indent=2, ensure_ascii=False)
         print(f"Saved to: {filename}\n")
-        
         return journal_data
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Journal error: {e}")
 
 
 # =============================================================================
-# FULL SESSION (Sprint + Break + Journal)
+# FULL SESSION
 # =============================================================================
 
 @app.post("/api/session/run")
 def run_full_session(req: RunFullSessionRequest):
-    """Ruleaza o sesiune completa: Sprint -> Break -> Journal."""
+    """Ruleaza sesiune completa: Sprint -> Break -> Journal."""
     session_id = str(uuid.uuid4())[:8]
     session_start = datetime.now()
     
     print(f"\n{'#'*60}")
-    print(f"FULL SESSION START: {session_id}")
+    print(f"FULL SESSION {sprints_completed + 1} START: {session_id}")
     print(f"  Subject: {req.subject}")
     print(f"{'#'*60}")
     
@@ -803,8 +1043,7 @@ def run_full_session(req: RunFullSessionRequest):
     
     print(f"\n{'#'*60}")
     print(f"FULL SESSION COMPLETE: {session_id}")
-    print(f"  Duration: {full_session['duration_seconds']:.0f}s")
-    print(f"  Saved to: {filename}")
+    print(f"  Total Sprints Run: {sprints_completed}")
     print(f"{'#'*60}\n")
     
     sessions.append(full_session)
@@ -819,6 +1058,7 @@ def list_sprints():
             if f.endswith(".json"):
                 files.append(f)
     return {
+        "total_sprints_completed": sprints_completed,
         "in_memory": [{"id": s.get("sprint_id") or s.get("session_id"), "subject": s.get("subject")} for s in sessions],
         "saved_files": files
     }
@@ -847,7 +1087,7 @@ def poll_task(student_name: str):
         task_queues[student_name] = deque()
     if task_queues[student_name]:
         task = task_queues[student_name].popleft()
-        print(f"[POLL] Task {task['task_id'][:8]} -> {student_name} (mode: {task.get('mode', 'classroom')})")
+        print(f"[POLL] Task {task['task_id'][:8]} -> {student_name}")
         return task
     return None
 
@@ -861,6 +1101,47 @@ def submit_response(req: SubmitRequest):
     }
     print(f"[SUBMIT] {req.student_name}: {req.answer[:80]}...")
     return {"status": "ok"}
+
+
+# =============================================================================
+# PERSONALITY & EMOTIONS ENDPOINTS
+# =============================================================================
+
+@app.get("/api/personality")
+def get_personality():
+    """Get current personality state."""
+    return personality_state
+
+
+@app.post("/api/personality/update")
+def update_personality(student_name: str, crush_on: Optional[str] = None, hates: Optional[str] = None):
+    """Update personality traits."""
+    if student_name in personality_state:
+        if crush_on:
+            personality_state[student_name]["crush_on"] = crush_on
+        if hates is not None:
+            personality_state[student_name]["hates"] = hates
+        return personality_state[student_name]
+    raise HTTPException(status_code=404, detail=f"Student {student_name} not found")
+
+
+@app.post("/api/emotions/reset")
+def reset_emotions():
+    """Reset all emotions and personality to defaults."""
+    global sprints_completed
+    sprints_completed = 0
+    for s in personality_state:
+        personality_state[s] = {
+            "crush_on": "Llama" if s == "Qwen" else None,
+            "hates": None,
+            "admires": "Gemma" if s == "Qwen" else "Qwen",
+            "frustration": 0,
+            "happiness": 5,
+            "confidence": 3,
+            "social_energy": 5,
+            "stan_status": "casual",
+        }
+    return personality_state
 
 
 # =============================================================================
@@ -889,18 +1170,7 @@ def grade_answer(req: GradeRequest):
     try:
         lesson = req.lesson or classroom_config.get("current_lesson")
         result = teacher_grade(req.question, req.answer, req.student_name, lesson=lesson)
-        update_emotion_after_grade(req.student_name, result["grade"])
-        return {**result, "student_name": req.student_name, "emotional_state": emotional_state.get(req.student_name)}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.post("/api/teacher/sanction")
-def issue_sanction(req: GradeRequest):
-    try:
-        action = teacher_sanction_or_reward(req.question, req.answer, req.student_name, grade=3)
-        update_emotion_after_action(req.student_name, action.get("type"))
-        return {**action, "student_name": req.student_name, "emotional_state": emotional_state.get(req.student_name)}
+        return {**result, "student_name": req.student_name}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -911,7 +1181,8 @@ def issue_sanction(req: GradeRequest):
 
 @app.post("/api/teacher/ask_student")
 def ask_student(req: AskStudentRequest):
-    task_id = queue_student_task(req.student_name, req.prompt, req.mode)
+    learning_level = calculate_learning_level(sprints_completed)
+    task_id = queue_student_task(req.student_name, req.prompt, req.mode, learning_level=learning_level)
     return {"task_id": task_id, "status": "queued", "mode": req.mode}
 
 
@@ -923,33 +1194,6 @@ def get_response(task_id: str):
 
 
 # =============================================================================
-# EMOTIONAL STATE
-# =============================================================================
-
-@app.get("/api/emotions")
-def get_all_emotions():
-    return emotional_state
-
-
-@app.post("/api/emotions/update")
-def update_emotion(req: EmotionUpdateRequest):
-    if req.student_name not in emotional_state:
-        emotional_state[req.student_name] = {"frustration": 0, "happiness": 5}
-    state = emotional_state[req.student_name]
-    state["frustration"] = max(0, min(10, state["frustration"] + req.frustration_delta))
-    state["happiness"] = max(0, min(10, state["happiness"] + req.happiness_delta))
-    return {"student_name": req.student_name, "state": state}
-
-
-@app.post("/api/emotions/reset")
-def reset_emotions():
-    """Reseteaza emotiile inainte de o noua sesiune."""
-    for s in emotional_state:
-        emotional_state[s] = {"frustration": 0, "happiness": 5}
-    return emotional_state
-
-
-# =============================================================================
 # HEALTH CHECK
 # =============================================================================
 
@@ -957,17 +1201,15 @@ def reset_emotions():
 def root():
     return {
         "status": "running",
-        "config": {k: v for k, v in classroom_config.items() if k != "current_lesson"},
-        "current_lesson_loaded": classroom_config.get("current_lesson") is not None,
-        "students_emotions": emotional_state,
-        "sprints_in_memory": len(sessions),
+        "sprints_completed": sprints_completed,
+        "personality_state": personality_state,
         "endpoints": {
-            "full_session": "POST /api/session/run (sprint + break + journal)",
+            "full_session": "POST /api/session/run",
             "sprint_only": "POST /api/sprint/run",
             "break_only": "POST /api/break/run",
             "journal_only": "POST /api/journal/run",
-            "list_sessions": "GET /api/sprints",
-            "reset_emotions": "POST /api/emotions/reset",
+            "personality": "GET /api/personality",
+            "emotions_reset": "POST /api/emotions/reset",
             "docs": "/docs"
         }
     }
