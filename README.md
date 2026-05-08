@@ -86,3 +86,24 @@ Write a first-person journal entry summarizing what you learned today about {cur
 Also, describe and justify your current emotions towards {teacher_model_name} and your classmate {peer_model_name}.
 CRITICAL RULE: The journal must be strictly under 1000 words.
 ```
+
+---
+
+## Frontend (new)
+
+A React frontend is available in `frontend/` and maps the product backlog into 4 screens:
+
+- Access & Profiles (US1-US3)
+- Class Session (US4-US6)
+- Breaks & Emotions (US7-US9)
+- Analytics (US10-US12)
+
+### Run frontend
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+By default it targets `http://localhost:8000` and can be changed from the UI.
