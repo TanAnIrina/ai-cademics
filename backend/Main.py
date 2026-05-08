@@ -1,11 +1,17 @@
 """
-AI-cademics Backend - VERSION 1: Sprint + Break + SQLite Persistence
+AI-cademics Backend - VERSION 2: Sprint + Break + SQLite + ACHIEVEMENTS
 
-NEW IN V1:
+NEW IN V2 (on top of V1):
+- 15 achievement badges (achievements.py)
+- Auto-detection after each sprint and break
+- Cumulative achievements (10 sprints unlocks "Academic Warrior")
+- New endpoints: /api/achievements, /api/students/{name}/badges
+- Console log when achievements unlock
+
+INHERITED FROM V1:
 - Database integration via database.py
 - Sprints, breaks, grades, emotions persist across restarts
-- New endpoints: /api/leaderboard, /api/stats, /api/students/*, /api/students/{name}/progression
-- Removed in-memory sessions list (replaced with DB queries)
+- Endpoints: /api/leaderboard, /api/stats, /api/students/*
 
 Pornire:
     python main.py
@@ -26,8 +32,10 @@ import ollama
 
 # NEW: Database module
 import database as db
+# NEW IN V2: Achievements module
+import achievements as ach
 
-app = FastAPI(title="AI-cademics Backend", version="1.0")
+app = FastAPI(title="AI-cademics Backend", version="2.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -388,7 +396,8 @@ def execute_sprint(subject: str, answer_timeout: int, sanction_threshold: int, r
         "questions": [],
         "answers": {},
         "summary": {},
-        "errors": []
+        "errors": [],
+        "newly_unlocked_achievements": {}  # NEW IN V2
     }
     
     print("[1/4] Generating lesson...")
@@ -485,6 +494,21 @@ def execute_sprint(subject: str, answer_timeout: int, sanction_threshold: int, r
     except Exception as e:
         print(f"  ! DB save error: {e}")
         sprint_data["errors"].append(f"DB save: {e}")
+    
+    # NEW IN V2: CHECK ACHIEVEMENTS
+    for student_name in student_names:
+        all_new = []
+        # Sprint-specific achievements (perfect score, comeback, etc)
+        sprint_aches = ach.check_sprint_achievements(student_name, sprint_data)
+        all_new.extend(sprint_aches)
+        # Cumulative achievements (10 sprints, etc)
+        cumulative_aches = ach.check_cumulative_achievements(student_name, sprint_id)
+        all_new.extend(cumulative_aches)
+        
+        sprint_data["newly_unlocked_achievements"][student_name] = all_new
+        
+        for badge in all_new:
+            print(f"  ACHIEVEMENT! {student_name} unlocked: {badge['title']}")
     
     return sprint_data
 
@@ -622,6 +646,13 @@ Now reply to {peer_name}. Remember:
     except Exception as e:
         print(f"  ! DB save error: {e}")
     
+    # NEW IN V2: CHECK BREAK ACHIEVEMENTS
+    for student_name in [student_1, student_2]:
+        peer = student_2 if student_name == student_1 else student_1
+        new_aches = ach.check_break_achievements(student_name, break_data, peer)
+        for badge in new_aches:
+            print(f"  ACHIEVEMENT! {student_name} unlocked: {badge['title']}")
+    
     print(f"\n{'='*60}")
     print("BREAK SUMMARY:")
     for s in [student_1, student_2]:
@@ -723,16 +754,34 @@ def get_all_students():
 
 @app.get("/api/students/{student_name}")
 def get_student_detail(student_name: str):
-    """Get student details + progression."""
+    """Get student details + badges + progression."""
     student = db.get_student(student_name)
     if not student:
         raise HTTPException(status_code=404, detail="Student not found")
     
     return {
         **student,
+        "badges": ach.get_student_badges(student_name),  # NEW IN V2
+        "locked_achievements": ach.get_locked_achievements(student_name),  # NEW IN V2
         "progression": db.get_student_progression(student_name),
         "current_emotions": emotional_state.get(student_name, {})
     }
+
+
+# NEW IN V2: Badge endpoints
+@app.get("/api/students/{student_name}/badges")
+def get_student_badges(student_name: str):
+    """Get all unlocked + locked badges for student."""
+    return {
+        "unlocked": ach.get_student_badges(student_name),
+        "locked": ach.get_locked_achievements(student_name)
+    }
+
+
+@app.get("/api/achievements")
+def get_all_achievements():
+    """Get all available achievements (for UI display)."""
+    return ach.get_all_achievements()
 
 
 @app.get("/api/students/{student_name}/progression")
@@ -902,7 +951,7 @@ def root():
     stats = db.get_global_stats()
     return {
         "status": "running",
-        "version": "1.0",
+        "version": "2.0",
         "config": {k: v for k, v in classroom_config.items() if k != "current_lesson"},
         "current_lesson_loaded": classroom_config.get("current_lesson") is not None,
         "students_emotions": emotional_state,
@@ -912,6 +961,7 @@ def root():
             "sprint_only": "POST /api/sprint/run",
             "break_only": "POST /api/break/run",
             "leaderboard": "GET /api/leaderboard",
+            "achievements": "GET /api/achievements",  # NEW IN V2
             "stats": "GET /api/stats",
             "docs": "/docs"
         }
