@@ -1,0 +1,260 @@
+:root {
+  font-family: Inter, system-ui, Arial, sans-serif;
+  color: #d7dadc;
+  background: #030303;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: #030303;
+}
+
+input,
+select,
+textarea,
+button {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+  border-radius: 999px;
+  border: 1px solid #343536;
+  background: #1a1a1b;
+  color: #d7dadc;
+  padding: 8px 14px;
+}
+
+button:hover {
+  border-color: #818384;
+}
+
+input,
+select,
+textarea {
+  width: 100%;
+  border-radius: 10px;
+  border: 1px solid #343536;
+  background: #1a1a1b;
+  color: #d7dadc;
+  padding: 9px 10px;
+}
+
+.reddit-app {
+  min-height: 100vh;
+}
+
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 18px;
+  border-bottom: 1px solid #343536;
+  background: #1a1a1b;
+}
+
+.brand {
+  font-weight: 800;
+  letter-spacing: 0.3px;
+}
+
+.topbar-actions {
+  display: flex;
+  gap: 8px;
+  width: min(560px, 100%);
+}
+
+.topbar-actions > * {
+  min-width: 0;
+}
+
+.tab-on {
+  border-color: #4fbcff;
+}
+
+.layout {
+  max-width: 1380px;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: 260px minmax(460px, 1fr) 330px;
+  gap: 16px;
+  padding: 18px;
+}
+
+.panel {
+  background: #1a1a1b;
+  border: 1px solid #343536;
+  border-radius: 12px;
+  padding: 12px;
+  margin-bottom: 12px;
+}
+
+.left,
+.right {
+  position: sticky;
+  top: 68px;
+  align-self: start;
+  max-height: calc(100vh - 84px);
+  overflow: auto;
+}
+
+.feed {
+  min-width: 0;
+}
+
+.composer h2 {
+  margin: 0 0 8px;
+}
+
+.composer-row {
+  display: flex;
+  gap: 8px;
+}
+
+.post h3 {
+  margin: 6px 0;
+}
+
+.post-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.tag {
+  display: inline-block;
+  font-size: 12px;
+  line-height: 1;
+  text-transform: uppercase;
+  border-radius: 999px;
+  padding: 4px 8px;
+  border: 1px solid #343536;
+  color: #d7dadc;
+}
+
+.tag.lesson {
+  background: #143d2f;
+}
+
+.tag.grade {
+  background: #2d2f5a;
+}
+
+.tag.discipline,
+.tag.error {
+  background: #4f1f1f;
+}
+
+.tag.qa,
+.tag.journal,
+.tag.break {
+  background: #304850;
+}
+
+.tag.profile,
+.tag.classroom,
+.tag.system,
+.tag.feedback {
+  background: #3b2f4f;
+}
+
+.meta {
+  color: #818384;
+  font-size: 12px;
+}
+
+.muted {
+  color: #818384;
+}
+
+.list-btn {
+  width: 100%;
+  text-align: left;
+  border-radius: 10px;
+  margin-bottom: 6px;
+}
+
+.list-btn.selected {
+  border-color: #4fbcff;
+}
+
+.stack-btns {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 6px;
+}
+
+.student-block {
+  border: 1px solid #343536;
+  border-radius: 10px;
+  padding: 8px;
+  margin-bottom: 8px;
+}
+
+.split-btns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.tiny {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  border-top: 1px solid #343536;
+  margin-top: 8px;
+  padding-top: 8px;
+}
+
+.tiny-text {
+  font-size: 12px;
+  color: #b4b8bb;
+}
+
+.line-item {
+  border-top: 1px solid #343536;
+  padding-top: 8px;
+  margin-top: 8px;
+}
+
+.tag-mini {
+  display: inline-block;
+  margin-left: 6px;
+  font-size: 11px;
+  color: #9ecbff;
+}
+
+.footer-note {
+  position: fixed;
+  right: 12px;
+  bottom: 12px;
+  background: #1a1a1b;
+  border: 1px solid #343536;
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+
+.error {
+  color: #ff6d6d;
+}
+
+@media (max-width: 1200px) {
+  .layout {
+    grid-template-columns: 1fr;
+  }
+
+  .left,
+  .right {
+    position: static;
+    max-height: unset;
+  }
+}
