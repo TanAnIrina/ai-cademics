@@ -3,6 +3,11 @@ Database module for AI-cademics.
 SQLite persistence for sprints, grades, achievements, emotions history.
 
 Auto-creates database on first import.
+
+V1.1 changes:
+- Added create_sprint_stub() — inserts minimal sprint row at sprint START, so
+  FK-referenced inserts (emotions_history, grades, etc.) work mid-sprint.
+- save_sprint() is now idempotent — UPDATE if a stub exists, INSERT otherwise.
 """
 
 import sqlite3
@@ -189,27 +194,79 @@ def get_total_sprints() -> int:
         return row["count"] if row else 0
 
 
-def save_sprint(sprint_data: Dict):
-    """Save a complete sprint to database."""
-    sprint_id = sprint_data["sprint_id"]
-    sprint_number = get_total_sprints() + 1
+# ─── NEW IN V1.1 ─────────────────────────────────────────────────────────────
+def create_sprint_stub(sprint_id: str, subject: str, started_at: str,
+                       session_id: Optional[str] = None):
+    """
+    Insert minimal sprint row at the START of a sprint, so FK-referenced
+    inserts (emotions_history, grades, actions) work mid-sprint.
     
+    save_sprint() will later UPDATE this row with full data (lesson, ended_at,
+    duration, grades, etc.).
+    
+    Idempotent: safe to call multiple times — INSERT OR IGNORE skips if exists.
+    """
+    sprint_number = get_total_sprints() + 1
     with get_db() as conn:
         conn.execute("""
-            INSERT INTO sprints 
-                (id, sprint_number, subject, lesson, started_at, ended_at, duration_seconds, session_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            sprint_id,
-            sprint_number,
-            sprint_data.get("subject"),
-            sprint_data.get("lesson"),
-            sprint_data.get("started_at"),
-            sprint_data.get("ended_at"),
-            sprint_data.get("duration_seconds"),
-            sprint_data.get("session_id")
-        ))
+            INSERT OR IGNORE INTO sprints
+                (id, sprint_number, subject, started_at, session_id)
+            VALUES (?, ?, ?, ?, ?)
+        """, (sprint_id, sprint_number, subject, started_at, session_id))
+
+
+def save_sprint(sprint_data: Dict):
+    """
+    Save (or finalize) a complete sprint to database.
+    
+    V1.1: idempotent w.r.t. the sprint row — if a stub exists (from
+    create_sprint_stub), it UPDATEs the full data; otherwise INSERTs new.
+    Grades/actions are always inserted (this should only be called once
+    per sprint after answers are collected).
+    """
+    sprint_id = sprint_data["sprint_id"]
+    
+    with get_db() as conn:
+        # ── 1. Upsert the sprint row ──────────────────────────────────────
+        existing = conn.execute("SELECT id FROM sprints WHERE id = ?", (sprint_id,)).fetchone()
         
+        if existing:
+            # Stub exists — UPDATE with full data
+            conn.execute("""
+                UPDATE sprints SET
+                    subject = COALESCE(?, subject),
+                    lesson = ?,
+                    ended_at = ?,
+                    duration_seconds = ?,
+                    session_id = COALESCE(?, session_id)
+                WHERE id = ?
+            """, (
+                sprint_data.get("subject"),
+                sprint_data.get("lesson"),
+                sprint_data.get("ended_at"),
+                sprint_data.get("duration_seconds"),
+                sprint_data.get("session_id"),
+                sprint_id,
+            ))
+        else:
+            # No stub — fresh INSERT (legacy path)
+            sprint_number = get_total_sprints() + 1
+            conn.execute("""
+                INSERT INTO sprints
+                    (id, sprint_number, subject, lesson, started_at, ended_at, duration_seconds, session_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                sprint_id,
+                sprint_number,
+                sprint_data.get("subject"),
+                sprint_data.get("lesson"),
+                sprint_data.get("started_at"),
+                sprint_data.get("ended_at"),
+                sprint_data.get("duration_seconds"),
+                sprint_data.get("session_id")
+            ))
+        
+        # ── 2. Insert grades + actions + counter updates (unchanged) ──────
         for student_name, answers in sprint_data.get("answers", {}).items():
             for answer in answers:
                 cursor = conn.execute("""
@@ -363,8 +420,15 @@ def has_achievement(student_name: str, achievement_key: str) -> bool:
 # EMOTIONS HISTORY
 # =============================================================================
 
-def record_emotion(student_name: str, frustration: int, happiness: int, 
+def record_emotion(student_name: str, frustration: int, happiness: int,
                     sprint_id: Optional[str] = None, context: str = ""):
+    """
+    V1.1: defensive — convert empty-string sprint_id to None so the FK is
+    treated as NULL (which is allowed) rather than referencing a non-existent
+    sprint with id=''.
+    """
+    if sprint_id == "":
+        sprint_id = None
     with get_db() as conn:
         conn.execute("""
             INSERT INTO emotions_history (student_name, frustration, happiness, sprint_id, context)
