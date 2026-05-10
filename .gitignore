@@ -1,0 +1,163 @@
+# ============================================================================
+# AI-cademics - .gitignore
+# ============================================================================
+
+# ============================================================================
+# PROJECT-SPECIFIC
+# ============================================================================
+
+# SQLite database (auto-generated)
+*.db
+*.sqlite
+*.sqlite3
+ai_cademics.db
+ai_cademics.db-journal
+
+# Session logs (auto-generated per run)
+sessions_log/
+*.session.json
+
+# Environment variables (NEVER commit secrets!)
+.env
+.env.local
+.env.*.local
+
+# ============================================================================
+# PYTHON
+# ============================================================================
+
+# Byte-compiled
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
+*.egg-info/
+*.egg
+build/
+dist/
+.eggs/
+
+# Virtual environments
+venv/
+.venv/
+env/
+.env/
+ENV/
+env.bak/
+venv.bak/
+
+# Testing
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+*.cover
+.hypothesis/
+.tox/
+
+# Type checking
+.mypy_cache/
+.dmypy.json
+.pyre/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# ============================================================================
+# IDE / EDITORS
+# ============================================================================
+
+# VS Code
+.vscode/
+*.code-workspace
+
+# PyCharm / IntelliJ
+.idea/
+*.iml
+*.iws
+
+# Sublime Text
+*.sublime-workspace
+*.sublime-project
+
+# Vim
+*.swp
+*.swo
+*.swn
+*~
+
+# Emacs
+\#*\#
+.\#*
+
+# ============================================================================
+# OPERATING SYSTEMS
+# ============================================================================
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+*.lnk
+desktop.ini
+$RECYCLE.BIN/
+
+# Linux
+*~
+.directory
+.Trash-*
+
+# ============================================================================
+# FRONTEND (in case React dashboard is added)
+# ============================================================================
+
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json.bak
+
+# Build outputs
+build/
+dist/
+.next/
+.nuxt/
+.cache/
+
+# ============================================================================
+# LOGS & TEMPORARY FILES
+# ============================================================================
+
+*.log
+logs/
+*.tmp
+*.temp
+*.bak
+*.backup
+*.old
+
+# ============================================================================
+# OLLAMA / MODELS (huge, never commit)
+# ============================================================================
+
+models/
+*.gguf
+*.bin
+*.safetensors
+
+# ============================================================================
+# DOCS BUILD
+# ============================================================================
+
+docs/_build/
+site/
