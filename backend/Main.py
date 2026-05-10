@@ -1,23 +1,27 @@
 """
-AI-cademics Backend - VERSION 2: Sprint + Break + SQLite + ACHIEVEMENTS
+AI-cademics Backend - VERSION 3: Sprint + Break + SQLite + Achievements + WEBSOCKET
 
-NEW IN V2 (on top of V1):
-- 15 achievement badges (achievements.py)
-- Auto-detection after each sprint and break
-- Cumulative achievements (10 sprints unlocks "Academic Warrior")
-- New endpoints: /api/achievements, /api/students/{name}/badges
-- Console log when achievements unlock
+NEW IN V3 (on top of V2):
+- WebSocket endpoint /ws for real-time event broadcasting
+- Live events: sprint_started, lesson_complete, grade_assigned, achievement_unlocked, etc
+- Dashboard can connect and see EVERY action in real-time
+- Event history kept for late-joining clients (last 100 events)
+
+INHERITED FROM V2:
+- 15 achievement badges with auto-detection
+- Cumulative achievements
 
 INHERITED FROM V1:
-- Database integration via database.py
-- Sprints, breaks, grades, emotions persist across restarts
-- Endpoints: /api/leaderboard, /api/stats, /api/students/*
+- Database persistence
 
 Pornire:
     python main.py
+
+WebSocket:
+    ws://localhost:8000/ws
 """
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from collections import deque
@@ -34,8 +38,10 @@ import ollama
 import database as db
 # NEW IN V2: Achievements module
 import achievements as ach
+# NEW IN V3: WebSocket streaming module
+import streaming as ws
 
-app = FastAPI(title="AI-cademics Backend", version="2.0")
+app = FastAPI(title="AI-cademics Backend", version="3.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -341,6 +347,10 @@ def update_emotion_after_grade(student_name: str, grade: int, sprint_id: str = "
     # NEW: persist to DB
     state = emotional_state[student_name]
     db.record_emotion(student_name, state["frustration"], state["happiness"], sprint_id, f"After grade {grade}")
+    # NEW IN V3: broadcast to WebSocket
+    ws.manager.broadcast_sync(ws.event_emotion_updated(
+        student_name, state["frustration"], state["happiness"], f"Got {grade}/10"
+    ))
 
 
 def update_emotion_after_action(student_name: str, action_type: str, sprint_id: str = ""):
@@ -355,6 +365,10 @@ def update_emotion_after_action(student_name: str, action_type: str, sprint_id: 
     # NEW: persist to DB
     state = emotional_state[student_name]
     db.record_emotion(student_name, state["frustration"], state["happiness"], sprint_id, f"After {action_type}")
+    # NEW IN V3: broadcast to WebSocket
+    ws.manager.broadcast_sync(ws.event_emotion_updated(
+        student_name, state["frustration"], state["happiness"], action_type
+    ))
 
 
 # =============================================================================
@@ -387,6 +401,9 @@ def execute_sprint(subject: str, answer_timeout: int, sanction_threshold: int, r
     print(f"SPRINT START: {sprint_id} | Subject: {subject}")
     print(f"{'='*60}\n")
     
+    # NEW IN V3: broadcast sprint started
+    ws.manager.broadcast_sync(ws.event_sprint_started(sprint_id, subject))
+    
     sprint_data = {
         "sprint_id": sprint_id,
         "subject": subject,
@@ -405,9 +422,14 @@ def execute_sprint(subject: str, answer_timeout: int, sanction_threshold: int, r
     sprint_data["lesson"] = lesson
     print(f"      Lesson generated ({len(lesson)} chars)\n")
     
+    # NEW IN V3: broadcast lesson complete
+    ws.manager.broadcast_sync(ws.event_lesson_complete(lesson, sprint_id, subject))
+    
     print("[2/4] Generating 10 questions based on lesson...")
     questions = teacher_generate_questions(subject, lesson=lesson)
     sprint_data["questions"] = questions
+    # NEW IN V3: broadcast questions
+    ws.manager.broadcast_sync(ws.event_questions_generated(questions, sprint_id))
     print(f"      10 questions generated\n")
     
     print("[3/4] Sending questions to students (with lesson context)...")
@@ -431,6 +453,9 @@ def execute_sprint(subject: str, answer_timeout: int, sanction_threshold: int, r
             question = task_info["question"]
             task_id = task_info["task_id"]
             
+            # NEW IN V3: broadcast student thinking
+            ws.manager.broadcast_sync(ws.event_student_thinking(student_name, question_idx, question))
+            
             print(f"  Q{question_idx+1}...", end=" ", flush=True)
             answer = wait_for_response(task_id, timeout=answer_timeout)
             
@@ -442,6 +467,9 @@ def execute_sprint(subject: str, answer_timeout: int, sanction_threshold: int, r
                 })
                 continue
             
+            # NEW IN V3: broadcast answer received
+            ws.manager.broadcast_sync(ws.event_answer_received(student_name, question_idx, answer))
+            
             try:
                 grade_result = teacher_grade(question, answer, student_name, lesson=lesson)
                 grade = grade_result["grade"]
@@ -450,6 +478,8 @@ def execute_sprint(subject: str, answer_timeout: int, sanction_threshold: int, r
                 grade = 5
                 reasoning = f"Grading error: {e}"
             
+            # NEW IN V3: broadcast grade
+            ws.manager.broadcast_sync(ws.event_grade_assigned(student_name, question_idx, grade, reasoning))
             update_emotion_after_grade(student_name, grade, sprint_id)
             
             action = None
@@ -457,6 +487,11 @@ def execute_sprint(subject: str, answer_timeout: int, sanction_threshold: int, r
                 try:
                     action = teacher_sanction_or_reward(question, answer, student_name, grade)
                     update_emotion_after_action(student_name, action.get("type"), sprint_id)
+                    # NEW IN V3: broadcast action
+                    ws.manager.broadcast_sync(ws.event_action_issued(
+                        student_name, action.get("type"), action.get("points", 0),
+                        action.get("explanation", "")
+                    ))
                 except Exception as e:
                     sprint_data["errors"].append(f"Sanction error: {e}")
             
@@ -509,6 +544,11 @@ def execute_sprint(subject: str, answer_timeout: int, sanction_threshold: int, r
         
         for badge in all_new:
             print(f"  ACHIEVEMENT! {student_name} unlocked: {badge['title']}")
+            # NEW IN V3: broadcast achievement
+            ws.manager.broadcast_sync(ws.event_achievement_unlocked(student_name, badge))
+    
+    # NEW IN V3: broadcast sprint completed
+    ws.manager.broadcast_sync(ws.event_sprint_completed(sprint_id, sprint_data["summary"]))
     
     return sprint_data
 
@@ -547,6 +587,9 @@ def execute_break(rounds: int, timeout: int, sprint_id: Optional[str] = None) ->
           f"{student_2}={emotional_state[student_2]['frustration']}")
     print(f"{'='*60}\n")
     
+    # NEW IN V3: broadcast break started
+    ws.manager.broadcast_sync(ws.event_break_started(break_id, sprint_id))
+    
     break_data = {
         "break_id": break_id,
         "started_at": break_start.isoformat(),
@@ -565,6 +608,8 @@ def execute_break(rounds: int, timeout: int, sprint_id: Optional[str] = None) ->
     break_data["conversation"].append({
         "round": 0, "speaker": student_1, "message": initial_message, "is_initial": True
     })
+    # NEW IN V3: broadcast initial message
+    ws.manager.broadcast_sync(ws.event_break_message(student_1, initial_message, 0))
     
     last_speaker = student_1
     
@@ -611,6 +656,16 @@ Now reply to {peer_name}. Remember:
             # NEW: record DB
             db.record_emotion(peer_name, emotional_state[peer_name]["frustration"],
                                 emotional_state[peer_name]["happiness"], sprint_id, "Comforted by peer")
+            # NEW IN V3: broadcast emotion update
+            ws.manager.broadcast_sync(ws.event_emotion_updated(
+                peer_name, emotional_state[peer_name]["frustration"],
+                emotional_state[peer_name]["happiness"], f"Comforted by {current_speaker}"
+            ))
+        
+        # NEW IN V3: broadcast break message
+        ws.manager.broadcast_sync(ws.event_break_message(
+            current_speaker, message, round_num, mentioned_subject, comforted_peer
+        ))
         
         break_data["conversation"].append({
             "round": round_num,
@@ -652,6 +707,8 @@ Now reply to {peer_name}. Remember:
         new_aches = ach.check_break_achievements(student_name, break_data, peer)
         for badge in new_aches:
             print(f"  ACHIEVEMENT! {student_name} unlocked: {badge['title']}")
+            # NEW IN V3: broadcast achievement
+            ws.manager.broadcast_sync(ws.event_achievement_unlocked(student_name, badge))
     
     print(f"\n{'='*60}")
     print("BREAK SUMMARY:")
@@ -662,6 +719,9 @@ Now reply to {peer_name}. Remember:
               f"no_subject={'OK' if e['passed_no_subject'] else 'FAIL'}, "
               f"comforted={'YES' if e['comforted_peer'] else 'NO'}")
     print(f"{'='*60}\n")
+    
+    # NEW IN V3: broadcast break completed
+    ws.manager.broadcast_sync(ws.event_break_completed(break_id, break_data["evals_summary"]))
     
     return break_data
 
@@ -695,6 +755,9 @@ def run_full_session(req: RunFullSessionRequest):
     print(f"FULL SESSION START: {session_id}")
     print(f"  Subject: {req.subject}")
     print(f"{'#'*60}")
+    
+    # NEW IN V3: broadcast session started
+    ws.manager.broadcast_sync(ws.event_session_started(session_id, req.subject))
     
     full_session = {
         "session_id": session_id,
@@ -733,7 +796,30 @@ def run_full_session(req: RunFullSessionRequest):
     print(f"  Duration: {full_session['duration_seconds']:.0f}s")
     print(f"{'#'*60}\n")
     
+    # NEW IN V3: broadcast session completed
+    ws.manager.broadcast_sync(ws.event_session_completed(session_id, full_session["duration_seconds"]))
+    
     return full_session
+
+
+# =============================================================================
+# NEW IN V3: WEBSOCKET ENDPOINT
+# =============================================================================
+
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    """Real-time event stream for dashboard."""
+    await ws.manager.connect(websocket)
+    try:
+        while True:
+            # Keep connection alive, listen for ping/messages
+            data = await websocket.receive_text()
+            await websocket.send_json({"type": "pong", "data": data})
+    except WebSocketDisconnect:
+        ws.manager.disconnect(websocket)
+    except Exception as e:
+        print(f"[WS] Error: {e}")
+        ws.manager.disconnect(websocket)
 
 
 # =============================================================================
@@ -929,6 +1015,10 @@ def update_emotion(req: EmotionUpdateRequest):
     
     # NEW: persist
     db.record_emotion(req.student_name, state["frustration"], state["happiness"], context="Manual update")
+    # NEW IN V3: broadcast
+    ws.manager.broadcast_sync(ws.event_emotion_updated(
+        req.student_name, state["frustration"], state["happiness"], "Manual update"
+    ))
     
     return {"student_name": req.student_name, "state": state}
 
@@ -939,6 +1029,8 @@ def reset_emotions():
     for s in emotional_state:
         emotional_state[s] = {"frustration": 0, "happiness": 5}
         db.record_emotion(s, 0, 5, context="Reset")
+        # NEW IN V3: broadcast
+        ws.manager.broadcast_sync(ws.event_emotion_updated(s, 0, 5, "Reset"))
     return emotional_state
 
 
@@ -951,17 +1043,19 @@ def root():
     stats = db.get_global_stats()
     return {
         "status": "running",
-        "version": "2.0",
+        "version": "3.0",
         "config": {k: v for k, v in classroom_config.items() if k != "current_lesson"},
         "current_lesson_loaded": classroom_config.get("current_lesson") is not None,
         "students_emotions": emotional_state,
         "global_stats": stats,
+        "websocket_connections": len(ws.manager.active_connections),  # NEW IN V3
         "endpoints": {
+            "websocket": "ws://localhost:8000/ws",  # NEW IN V3
             "full_session": "POST /api/session/run",
             "sprint_only": "POST /api/sprint/run",
             "break_only": "POST /api/break/run",
             "leaderboard": "GET /api/leaderboard",
-            "achievements": "GET /api/achievements",  # NEW IN V2
+            "achievements": "GET /api/achievements",
             "stats": "GET /api/stats",
             "docs": "/docs"
         }
