@@ -138,6 +138,10 @@ class RunFullSessionRequest(BaseModel):
     break_timeout: int = 60
 
 
+class ResetSprintRequest(BaseModel):
+    reset_emotions: bool = False
+
+
 # =============================================================================
 # SYSTEM PROMPTS
 # =============================================================================
@@ -589,6 +593,38 @@ def run_sprint(req: RunSprintRequest):
         return sprint_data
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Sprint error: {e}")
+
+
+@app.post("/api/sprint/reset")
+def reset_sprint(req: ResetSprintRequest = ResetSprintRequest()):
+    """
+    Reseteaza starea activa de sprint din memorie:
+    - subiect/lectie curenta
+    - cozi task-uri studenti
+    - raspunsuri task-uri
+    Optional: reset emotii la baseline.
+    """
+    classroom_config["current_subject"] = None
+    classroom_config["current_lesson"] = None
+
+    task_queues.clear()
+    responses.clear()
+
+    if req.reset_emotions:
+        for student in emotional_state:
+            emotional_state[student] = {"frustration": 0, "happiness": 5}
+            db.record_emotion(student, 0, 5, context="Sprint reset")
+            ws.manager.broadcast_sync(ws.event_emotion_updated(student, 0, 5, "Sprint reset"))
+
+    return {
+        "status": "ok",
+        "message": "Sprint state reset.",
+        "current_subject": classroom_config["current_subject"],
+        "current_lesson_loaded": classroom_config["current_lesson"] is not None,
+        "queued_students": list(task_queues.keys()),
+        "responses_total": len(responses),
+        "emotions_reset": req.reset_emotions
+    }
 
 
 # =============================================================================
