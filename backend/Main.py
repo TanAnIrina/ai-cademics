@@ -21,7 +21,7 @@ WebSocket:
     ws://localhost:8000/ws
 """
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from collections import deque
@@ -593,7 +593,13 @@ def execute_sprint(subject: str, answer_timeout: int, sanction_threshold: int, r
 
 
 @app.post("/api/sprint/run")
-def run_sprint(req: RunSprintRequest):
+def run_sprint(background_tasks: BackgroundTasks, req: RunSprintRequest):
+    """Ruleaza un sprint complet automat (US 2) - cu DB save - in background."""
+    background_tasks.add_task(run_sprint_sync, req)
+    return {"status": "started", "message": "Sprint started in background"}
+
+
+def run_sprint_sync(req: RunSprintRequest):
     """Ruleaza un sprint complet automat (US 2) - cu DB save."""
     try:
         sprint_data = execute_sprint(req.subject, req.answer_timeout, req.sanction_threshold, req.reward_threshold)
@@ -610,7 +616,8 @@ def run_sprint(req: RunSprintRequest):
         
         return sprint_data
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Sprint error: {e}")
+        print(f"Sprint error: {e}")
+        # Since it's background, can't raise HTTPException, just print
 
 
 @app.post("/api/sprint/reset")
@@ -622,6 +629,7 @@ def reset_sprint(req: ResetSprintRequest = ResetSprintRequest()):
     - raspunsuri task-uri
     Optional: reset emotii la baseline.
     """
+    print("session stopped")
     run_control["cancel_requested"] = True
     active_sprint_id = run_control.get("active_sprint_id")
 
@@ -826,7 +834,13 @@ Now reply to {peer_name}. Remember:
 
 
 @app.post("/api/break/run")
-def run_break(req: RunBreakRequest):
+def run_break(background_tasks: BackgroundTasks, req: RunBreakRequest):
+    """Ruleaza pauza cu schimb de mesaje (US 3 + US 5) + DB save - in background."""
+    background_tasks.add_task(run_break_sync, req)
+    return {"status": "started", "message": "Break started in background"}
+
+
+def run_break_sync(req: RunBreakRequest):
     """Ruleaza pauza cu schimb de mesaje (US 3 + US 5) + DB save."""
     try:
         break_data = execute_break(req.rounds, req.timeout)
@@ -837,7 +851,7 @@ def run_break(req: RunBreakRequest):
         
         return break_data
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Break error: {e}")
+        print(f"Break error: {e}")
 
 
 # =============================================================================
@@ -845,7 +859,13 @@ def run_break(req: RunBreakRequest):
 # =============================================================================
 
 @app.post("/api/session/run")
-def run_full_session(req: RunFullSessionRequest):
+def run_full_session(background_tasks: BackgroundTasks, req: RunFullSessionRequest):
+    """Ruleaza o sesiune completa: Sprint -> Break - in background."""
+    background_tasks.add_task(run_full_session_sync, req)
+    return {"status": "started", "message": "Full session started in background"}
+
+
+def run_full_session_sync(req: RunFullSessionRequest):
     """Ruleaza o sesiune completa: Sprint -> Break."""
     session_id = str(uuid.uuid4())[:8]
     session_start = datetime.now()
@@ -897,8 +917,6 @@ def run_full_session(req: RunFullSessionRequest):
     
     # NEW IN V3: broadcast session completed
     ws.manager.broadcast_sync(ws.event_session_completed(session_id, full_session["duration_seconds"]))
-    
-    return full_session
 
 
 # =============================================================================
