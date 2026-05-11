@@ -41,6 +41,8 @@ import achievements as ach
 # NEW IN V3: WebSocket streaming module
 import streaming as ws
 import live_state as live
+# NEW: Journals module (US 6 + US 11)
+import journals
 
 app = FastAPI(title="AI-cademics Backend", version="3.0")
 
@@ -195,6 +197,38 @@ Now answer this question based on the lesson above:
 QUESTION: {question}
 
 Answer in 1-2 sentences. Base your answer on what the Teacher taught."""
+
+
+def build_journal_prompt(student_name: str, sprint_summary: dict, subject: str) -> str:
+    """Prompt for a student to write a personal journal entry after a sprint."""
+    peer = get_peer_name(student_name)
+    avg = sprint_summary.get("average_grade", 0)
+    sanctions = sprint_summary.get("sanctions", 0)
+    rewards = sprint_summary.get("rewards", 0)
+    emo = sprint_summary.get("final_emotional_state") or {}
+    frustration = emo.get("frustration", 0)
+    happiness = emo.get("happiness", 0)
+
+    return f"""You are {student_name}. Class just ended. The subject was: "{subject}".
+
+Your performance:
+- Average grade: {avg}/10
+- Sanctions received: {sanctions}
+- Rewards received: {rewards}
+- Your current frustration: {frustration}/10
+- Your current happiness: {happiness}/10
+
+Write a PERSONAL JOURNAL entry (a diary, in your own voice) reflecting on:
+- What you learned today about {subject}
+- How you felt during the class — be honest about emotions
+- Your relationship with the teacher (was the grading fair?)
+- Your relationship with your peer {peer}
+- What you want to do differently next time
+
+Write in FIRST PERSON as {student_name}. Use natural, human-like language.
+Be honest, even vulnerable. Don't sugar-coat your feelings.
+
+IMPORTANT: Keep it under 1000 words. Around 300-500 words is ideal. Just write the journal entry directly, no headings or formatting — pure prose."""
 
 
 # =============================================================================
@@ -444,13 +478,6 @@ def execute_sprint(subject: str, answer_timeout: int, sanction_threshold: int, r
     except Exception as e:
         print(f"  ! Could not pre-save sprint stub: {e}")
     
-    # NEW IN V1.1: pre-save sprint stub so FK-referenced inserts work mid-sprint
-    # (record_emotion, save_sprint, etc. all reference sprint_id as a FK)
-    try:
-        db.create_sprint_stub(sprint_id, subject, sprint_start.isoformat())
-    except Exception as e:
-        print(f"  ! Could not pre-save sprint stub: {e}")
-    
     print("[1/4] Generating lesson...")
     lesson = teacher_generate_lesson(subject)
     if run_control["cancel_requested"]:
@@ -520,8 +547,6 @@ def execute_sprint(subject: str, answer_timeout: int, sanction_threshold: int, r
                     "grade": 0, "reasoning": "No answer (timeout)", "action": None
                 })
                 continue
-            
-            live.tick_timeout(student_name, question_idx)
             
             # NEW IN V3: broadcast answer received
             ws.manager.broadcast_sync(ws.event_answer_received(student_name, question_idx, answer))
@@ -612,9 +637,46 @@ def execute_sprint(subject: str, answer_timeout: int, sanction_threshold: int, r
     # NEW IN V3: broadcast sprint completed
     ws.manager.broadcast_sync(ws.event_sprint_completed(sprint_id, sprint_data["summary"]))
     
+    # NEW: STUDENTS WRITE JOURNAL ENTRIES (US 6 + US 11)
+    if not run_control["cancel_requested"]:
+        print("\n[journals] Asking students to write journal entries...")
+        sprint_data["journals"] = {}
+        for student_name in student_names:
+            try:
+                student_summary = sprint_data["summary"].get(student_name, {})
+                journal_prompt = build_journal_prompt(student_name, student_summary, subject)
+                task_id = queue_student_task(student_name, journal_prompt, mode="journal")
+                content = wait_for_response(task_id, timeout=120)
+                if content:
+                    saved = journals.save_journal(
+                        student_name=student_name,
+                        content=content,
+                        sprint_id=sprint_id,
+                        subject=subject,
+                    )
+                    sprint_data["journals"][student_name] = saved
+                    over_flag = " ⚠ OVER 1000 WORDS" if saved["over_word_limit"] else ""
+                    print(f"  ✓ {student_name}: {saved['word_count']} words{over_flag}")
+                    # Broadcast on WebSocket so the live UI can react
+                    try:
+                        ws.manager.broadcast_sync({
+                            "type": "journal_written",
+                            "student": student_name,
+                            "sprint_id": sprint_id,
+                            "word_count": saved["word_count"],
+                            "over_word_limit": saved["over_word_limit"],
+                        })
+                    except Exception:
+                        pass
+                else:
+                    print(f"  ! {student_name}: journal timed out (no response)")
+                    sprint_data["errors"].append(f"Journal timeout: {student_name}")
+            except Exception as e:
+                print(f"  ! {student_name}: journal error: {e}")
+                sprint_data["errors"].append(f"Journal error ({student_name}): {e}")
+    
     # LIVE: notify completion so frontend exits 'sprint_running' state
     live.end_sprint(sprint_id, sprint_data.get("summary", {}))
-
     
     return sprint_data
 
@@ -1080,6 +1142,44 @@ def get_live_state():
     """Live progress for the currently running sprint/break/session.
     Frontend polls this every ~1s while a sprint is running."""
     return live.snapshot()
+
+
+# =============================================================================
+# JOURNALS (US 6 + US 11)
+# =============================================================================
+
+@app.get("/api/journals")
+def list_all_journals(limit: int = 100):
+    """All journal entries, newest first."""
+    return {
+        "journals": journals.get_all_journals(limit=limit),
+        "stats": journals.get_stats(),
+    }
+
+
+@app.get("/api/journals/student/{student_name}")
+def list_journals_for_student(student_name: str, limit: int = 50):
+    """All journals written by a specific student."""
+    return {"journals": journals.get_journals_for_student(student_name, limit=limit)}
+
+
+@app.get("/api/journals/sprint/{sprint_id}")
+def list_journals_for_sprint(sprint_id: str):
+    """All journals from a specific sprint (one per student typically)."""
+    return {"journals": journals.get_journals_for_sprint(sprint_id)}
+
+
+@app.get("/api/journals/{journal_id}")
+def get_journal_detail(journal_id: int):
+    j = journals.get_journal(journal_id)
+    if not j:
+        raise HTTPException(status_code=404, detail="Journal not found")
+    return j
+
+
+@app.get("/api/journals/stats")
+def get_journals_stats():
+    return journals.get_stats()
 
 
 @app.post("/api/db/reset")
