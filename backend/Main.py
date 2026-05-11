@@ -437,8 +437,12 @@ def execute_sprint(subject: str, answer_timeout: int, sanction_threshold: int, r
         "newly_unlocked_achievements": {}  # NEW IN V2
     }
 
-    # Ensure this sprint id exists in DB for FK-referenced writes.
-    db.create_sprint_stub(sprint_id, subject, sprint_start.isoformat())
+    # NEW IN V1.1: pre-save sprint stub so FK-referenced inserts work mid-sprint
+    # (record_emotion, save_sprint, etc. all reference sprint_id as a FK)
+    try:
+        db.create_sprint_stub(sprint_id, subject, sprint_start.isoformat())
+    except Exception as e:
+        print(f"  ! Could not pre-save sprint stub: {e}")
     
     # NEW IN V1.1: pre-save sprint stub so FK-referenced inserts work mid-sprint
     # (record_emotion, save_sprint, etc. all reference sprint_id as a FK)
@@ -510,6 +514,7 @@ def execute_sprint(subject: str, answer_timeout: int, sanction_threshold: int, r
             
             if answer is None:
                 print(f"TIMEOUT")
+                live.tick_timeout(student_name, question_idx)
                 sprint_data["answers"][student_name].append({
                     "question_idx": question_idx, "question": question, "answer": None,
                     "grade": 0, "reasoning": "No answer (timeout)", "action": None
@@ -607,6 +612,10 @@ def execute_sprint(subject: str, answer_timeout: int, sanction_threshold: int, r
     # NEW IN V3: broadcast sprint completed
     ws.manager.broadcast_sync(ws.event_sprint_completed(sprint_id, sprint_data["summary"]))
     
+    # LIVE: notify completion so frontend exits 'sprint_running' state
+    live.end_sprint(sprint_id, sprint_data.get("summary", {}))
+
+    
     return sprint_data
 
 
@@ -625,6 +634,7 @@ def run_sprint_sync(req: RunSprintRequest):
             db.delete_sprint_progress(sprint_data.get("sprint_id"))
             run_control["active_sprint_id"] = None
             run_control["cancel_requested"] = False
+            live.reset()  # LIVE: clear so frontend /api/live returns idle
             return {"status": "cancelled", "sprint_id": sprint_data.get("sprint_id")}
         
         # JSON file backup (still saved)
@@ -632,8 +642,10 @@ def run_sprint_sync(req: RunSprintRequest):
         with open(filename, "w", encoding="utf-8") as f:
             json.dump(sprint_data, f, indent=2, ensure_ascii=False)
         
+        live.end_session()  # LIVE: notify success completion -> idle
         return sprint_data
     except Exception as e:
+        live.reset()  # LIVE: clear on error too
         print(f"Sprint error: {e}")
         # Since it's background, can't raise HTTPException, just print
 
@@ -661,6 +673,10 @@ def reset_sprint(req: ResetSprintRequest = ResetSprintRequest()):
         db.delete_sprint_progress(active_sprint_id)
     run_control["active_sprint_id"] = None
     run_control["active_break_id"] = None
+
+    # LIVE: clear so /api/live returns idle immediately;
+    # the frontend's live panel will disappear on the next poll.
+    live.reset()
 
     if req.reset_emotions:
         for student in emotional_state:
@@ -853,6 +869,9 @@ Now reply to {peer_name}. Remember:
     # NEW IN V3: broadcast break completed
     ws.manager.broadcast_sync(ws.event_break_completed(break_id, break_data["evals_summary"]))
     
+    # LIVE: notify completion so frontend exits 'break_running' state
+    live.end_break(break_id)
+    
     return break_data
 
 
@@ -867,13 +886,18 @@ def run_break_sync(req: RunBreakRequest):
     """Ruleaza pauza cu schimb de mesaje (US 3 + US 5) + DB save."""
     try:
         break_data = execute_break(req.rounds, req.timeout)
+        if break_data.get("cancelled"):
+            live.reset()  # LIVE: clear
+            return {"status": "cancelled"}
         
         filename = f"{SESSIONS_DIR}/break_{break_data['break_id']}.json"
         with open(filename, "w", encoding="utf-8") as f:
             json.dump(break_data, f, indent=2, ensure_ascii=False)
         
+        live.end_session()  # LIVE: notify success -> idle
         return break_data
     except Exception as e:
+        live.reset()  # LIVE: clear on error
         print(f"Break error: {e}")
 
 
@@ -941,6 +965,9 @@ def run_full_session_sync(req: RunFullSessionRequest):
     
     # NEW IN V3: broadcast session completed
     ws.manager.broadcast_sync(ws.event_session_completed(session_id, full_session["duration_seconds"]))
+    
+    # LIVE: notify session completion so frontend exits running state
+    live.end_session()
     
     return full_session
 

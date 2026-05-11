@@ -21,6 +21,7 @@ const STEP_LABELS = {
 }
 
 export default function RunPage() {
+  // ── Sprint config ─────────────────────────────────────────────
   const [subject, setSubject] = useState(SUBJECT_SUGGESTIONS[0])
   const [answerTimeout, setAnswerTimeout] = useState(90)
   const [sanctionThreshold, setSanctionThreshold] = useState(4)
@@ -28,65 +29,52 @@ export default function RunPage() {
   const [breakRounds, setBreakRounds] = useState(5)
   const [breakTimeout, setBreakTimeout] = useState(60)
 
-  const [running, setRunning] = useState(null)
-  const [result, setResult]   = useState(null)
-  const [error, setError]     = useState(null)
-  const [live, setLive]       = useState(null)
-  const [sprintStarted, setSprintStarted] = useState(false)
-
+  // ── Live state from /api/live polling ─────────────────────────
+  const [live, setLive] = useState(null)
+  const [error, setError] = useState(null)
+  const [stopping, setStopping] = useState(false)
   const pollRef = useRef(null)
-  const runTokenRef = useRef(0)
 
-  // Poll /api/live whenever something is running (and for a few seconds after,
-  // to let the user see the final state)
+  // Backend says something is running if status is not 'idle'
+  const isRunning = live && live.status && live.status !== 'idle'
+
+  // ── Poll /api/live ────────────────────────────────────────────
+  // Always poll while page is mounted. Cheap (1.5s). Backend dictates state.
   useEffect(() => {
-    if (running) {
-      const tick = async () => {
-        try {
-          const snap = await api.getLive()
-          setLive(snap)
-        } catch (e) {
-          // tolerate transient errors
-        }
+    const tick = async () => {
+      try {
+        const snap = await api.getLive()
+        setLive(snap)
+      } catch {
+        // tolerate transient errors
       }
-      tick()
-      pollRef.current = setInterval(tick, 1000)
-    } else {
-      // stop polling
-      if (pollRef.current) clearInterval(pollRef.current)
-      pollRef.current = null
     }
-    return () => {
-      if (pollRef.current) clearInterval(pollRef.current)
-    }
-  }, [running])
+    tick()
+    pollRef.current = setInterval(tick, 1500)
+    return () => clearInterval(pollRef.current)
+  }, [])
 
-  async function withRunning(action, fn) {
-    const token = ++runTokenRef.current
-    setRunning(action); setError(null); setResult(null); setLive(null)
+  // ── Start actions (POST, returns instantly thanks to BackgroundTasks) ──
+  async function start(action, fn) {
+    setError(null)
+    setStopping(false)
     try {
-      const r = await fn()
-      if (token !== runTokenRef.current) return
-      setResult({ action, data: r })
+      await fn()
+      // Next poll will show status=sprint_running, etc.
     } catch (e) {
-      if (token !== runTokenRef.current) return
       setError(e)
-    } finally {
-      if (token !== runTokenRef.current) return
-      setRunning(null)
     }
   }
 
-  const onSprint = () => {
-    setSprintStarted(true)
-    return withRunning('sprint', () =>
-      api.runSprint({ subject, answer_timeout: answerTimeout, sanction_threshold: sanctionThreshold, reward_threshold: rewardThreshold })
-    )
-  }
-  const onBreak = () => withRunning('break', () =>
+  const onSprint = () => start('sprint', () =>
+    api.runSprint({ subject, answer_timeout: answerTimeout,
+                     sanction_threshold: sanctionThreshold,
+                     reward_threshold: rewardThreshold })
+  )
+  const onBreak = () => start('break', () =>
     api.runBreak({ rounds: breakRounds, timeout: breakTimeout })
   )
-  const onSession = () => withRunning('session', () =>
+  const onSession = () => start('session', () =>
     api.runFullSession({
       subject, answer_timeout: answerTimeout,
       sanction_threshold: sanctionThreshold, reward_threshold: rewardThreshold,
@@ -94,28 +82,29 @@ export default function RunPage() {
     })
   )
 
+  // ── STOP SPRINT — calls reset endpoint + clears UI immediately ──
+  async function onStop() {
+    if (!confirm("Stop the current sprint? Progress will be discarded.")) return
+    setStopping(true)
+    try {
+      await api.resetSprint({ reset_emotions: false })
+      setLive(null)  // optimistic clear; next poll confirms idle
+    } catch (e) {
+      setError(e)
+    } finally {
+      setStopping(false)
+    }
+  }
+
+  // ── Reset actions (independent of running state) ───────────────
   const onResetEmotions = async () => {
-    try { await api.resetEmotions(); setResult({ action: 'reset', data: { ok: true } }) }
+    try { await api.resetEmotions() }
     catch (e) { setError(e) }
   }
   const onResetDB = async () => {
     if (!confirm('Reset entire database? All sprints, badges and emotion history will be wiped.')) return
-    try { await api.resetDatabase(); setResult({ action: 'reset_db', data: { ok: true } }) }
+    try { await api.resetDatabase() }
     catch (e) { setError(e) }
-  }
-  const onResetSprint = async () => {
-    const keepEmotions = confirm('Reset sprint state and keep current emotions?\nPress Cancel to reset emotions too.')
-    try {
-      // Invalidate any in-flight run response so it cannot overwrite reset UI state.
-      runTokenRef.current += 1
-      await api.resetSprint(!keepEmotions)
-      setResult({ action: 'reset_sprint', data: { ok: true, reset_emotions: !keepEmotions } })
-      setLive(null)
-      setRunning(null)
-      setSprintStarted(false)
-    } catch (e) {
-      setError(e)
-    }
   }
 
   return (
@@ -124,47 +113,43 @@ export default function RunPage() {
         <h2>Sprint configuration</h2>
         <div className="form-grid">
           <Field label="Subject" wide>
-            <input list="subjects" value={subject} disabled={!!running}
+            <input list="subjects" value={subject} disabled={isRunning}
               onChange={e => setSubject(e.target.value)}/>
             <datalist id="subjects">
               {SUBJECT_SUGGESTIONS.map(s => <option key={s} value={s} />)}
             </datalist>
           </Field>
           <Field label="Answer timeout (s)">
-            <input type="number" min="10" value={answerTimeout} disabled={!!running}
+            <input type="number" min="10" value={answerTimeout} disabled={isRunning}
               onChange={e => setAnswerTimeout(+e.target.value)}/>
           </Field>
           <Field label="Sanction threshold (≤)">
-            <input type="number" min="0" max="10" value={sanctionThreshold} disabled={!!running}
+            <input type="number" min="0" max="10" value={sanctionThreshold} disabled={isRunning}
               onChange={e => setSanctionThreshold(+e.target.value)}/>
           </Field>
           <Field label="Reward threshold (≥)">
-            <input type="number" min="0" max="10" value={rewardThreshold} disabled={!!running}
+            <input type="number" min="0" max="10" value={rewardThreshold} disabled={isRunning}
               onChange={e => setRewardThreshold(+e.target.value)}/>
           </Field>
           <Field label="Break rounds">
-            <input type="number" min="1" value={breakRounds} disabled={!!running}
+            <input type="number" min="1" value={breakRounds} disabled={isRunning}
               onChange={e => setBreakRounds(+e.target.value)}/>
           </Field>
           <Field label="Break timeout (s)">
-            <input type="number" min="10" value={breakTimeout} disabled={!!running}
+            <input type="number" min="10" value={breakTimeout} disabled={isRunning}
               onChange={e => setBreakTimeout(+e.target.value)}/>
           </Field>
         </div>
 
         <div className="run-buttons">
-          <button className="btn primary" onClick={onSprint}  disabled={!!running}>
-            {running === 'sprint' ? 'Running sprint…' : '▶ Run sprint'}
-          </button>
-          <button className="btn"         onClick={onBreak}   disabled={!!running}>
-            {running === 'break' ? 'Running break…' : '☕ Run break'}
-          </button>
-          <button className="btn accent"  onClick={onSession} disabled={!!running}>
-            {running === 'session' ? 'Running session…' : '⚡ Full session (sprint + break)'}
-          </button>
-          {sprintStarted && (
-            <button className="btn danger" onClick={onResetSprint}>
-              ■ Stop / Reset sprint
+          <button className="btn primary" onClick={onSprint}  disabled={isRunning}>▶ Run sprint</button>
+          <button className="btn"         onClick={onBreak}   disabled={isRunning}>☕ Run break</button>
+          <button className="btn accent"  onClick={onSession} disabled={isRunning}>⚡ Full session</button>
+
+          {/* STOP button — only visible while something is running */}
+          {isRunning && (
+            <button className="btn stop" onClick={onStop} disabled={stopping}>
+              {stopping ? '⏳ Stopping…' : '■ STOP SPRINT'}
             </button>
           )}
         </div>
@@ -173,18 +158,15 @@ export default function RunPage() {
       <section className="card">
         <h2>Danger zone</h2>
         <div className="run-buttons">
-          <button className="btn ghost" onClick={onResetEmotions} disabled={!!running}>Reset emotions</button>
-          <button className="btn danger" onClick={onResetDB} disabled={!!running}>Reset database</button>
+          <button className="btn ghost" onClick={onResetEmotions} disabled={isRunning}>Reset emotions</button>
+          <button className="btn danger" onClick={onResetDB} disabled={isRunning}>Reset database</button>
         </div>
       </section>
 
       <ErrorBox error={error} />
 
-      {/* LIVE PROGRESS */}
-      {running && live && <LiveProgress live={live} action={running} />}
-
-      {/* FINAL RESULT */}
-      {result && <ResultView result={result} />}
+      {/* LIVE PROGRESS PANEL — visible whenever backend says we're running */}
+      {isRunning && <LiveProgress live={live} onStop={onStop} stopping={stopping} />}
     </div>
   )
 }
@@ -193,7 +175,7 @@ export default function RunPage() {
 // LIVE PROGRESS PANEL
 // =========================================================================
 
-function LiveProgress({ live, action }) {
+function LiveProgress({ live, onStop, stopping }) {
   const pct = live.progress?.percent || 0
   const stepLabel = STEP_LABELS[live.step] || live.step || "Starting…"
 
@@ -210,6 +192,9 @@ function LiveProgress({ live, action }) {
           </span>
         </div>
         <code className="live-id">{live.current_id}</code>
+        <button className="btn stop btn-stop-inline" onClick={onStop} disabled={stopping}>
+          {stopping ? '⏳' : '■ Stop'}
+        </button>
       </div>
 
       {live.progress?.total > 0 && (
@@ -223,7 +208,6 @@ function LiveProgress({ live, action }) {
       )}
 
       <div className="live-grid">
-        {/* Recent answers */}
         {live.recent_answers?.length > 0 && (
           <div className="live-col">
             <h3>Latest answers</h3>
@@ -246,12 +230,11 @@ function LiveProgress({ live, action }) {
           </div>
         )}
 
-        {/* Break messages */}
         {live.break_messages?.length > 0 && (
           <div className="live-col">
             <h3>Break conversation</h3>
             <div className="live-stream live-stream-chat">
-              {live.break_messages.slice().reverse().slice(0, 8).reverse().map((m, i) => (
+              {live.break_messages.slice(-8).map((m, i) => (
                 <div key={i} className={`live-msg ${m.comforted_peer ? 'comfort' : ''}`}>
                   <strong>{m.speaker}:</strong> {m.message}
                   {m.mentioned_subject && <span className="warn-tag">⚠</span>}
@@ -262,7 +245,6 @@ function LiveProgress({ live, action }) {
           </div>
         )}
 
-        {/* Achievements as they unlock */}
         {(() => {
           const achEvents = (live.events || []).filter(e => e.kind === 'achievement')
           if (!achEvents.length) return null
@@ -271,11 +253,8 @@ function LiveProgress({ live, action }) {
               <h3>🎉 Achievements unlocked</h3>
               <div className="live-stream">
                 {achEvents.map((e, i) => (
-                  <div
-                    key={i}
-                    className="live-achievement"
-                    style={{ borderColor: e.color || '#888' }}
-                  >
+                  <div key={i} className="live-achievement"
+                       style={{ borderColor: e.color || '#888' }}>
                     <span className="live-achievement-icon">{e.icon}</span>
                     <div>
                       <strong>{e.student}</strong>
@@ -299,109 +278,11 @@ function formatElapsed(seconds) {
   return m > 0 ? `${m}m ${s}s` : `${s}s`
 }
 
-// =========================================================================
-// FIELD HELPER
-// =========================================================================
-
 function Field({ label, children, wide }) {
   return (
     <label className={`field ${wide ? 'wide' : ''}`}>
       <span className="field-label">{label}</span>
       {children}
     </label>
-  )
-}
-
-// =========================================================================
-// FINAL RESULT (after request resolves)
-// =========================================================================
-
-function ResultView({ result }) {
-  const { action, data } = result
-
-  if (action === 'reset' || action === 'reset_db' || action === 'reset_sprint') {
-    return (
-      <div className="card success-banner">
-        ✓ {action === 'reset_db'
-          ? 'Database wiped.'
-          : action === 'reset_sprint'
-            ? `Sprint reset${data?.reset_emotions ? ' (emotions reset too).' : '.'}`
-            : 'Emotions reset.'}
-      </div>
-    )
-  }
-  if (action === 'sprint' || (action === 'session' && data.sprint)) {
-    const sprint = action === 'sprint' ? data : data.sprint
-    return (
-      <div className="card">
-        <h2>✓ Sprint complete</h2>
-        <SprintSummary sprint={sprint} />
-        {action === 'session' && data.break && (
-          <>
-            <h2 style={{marginTop: 24}}>✓ Break complete</h2>
-            <BreakSummary breakData={data.break} />
-          </>
-        )}
-      </div>
-    )
-  }
-  if (action === 'break') {
-    return (
-      <div className="card">
-        <h2>✓ Break complete</h2>
-        <BreakSummary breakData={data} />
-      </div>
-    )
-  }
-  return <pre className="card">{JSON.stringify(data, null, 2)}</pre>
-}
-
-function SprintSummary({ sprint }) {
-  return (
-    <div>
-      <p className="muted small">
-        <code>{sprint.sprint_id}</code> · {sprint.subject} · {Math.round(sprint.duration_seconds || 0)}s
-      </p>
-      <div className="result-grid">
-        {Object.entries(sprint.summary || {}).map(([student, sum]) => (
-          <div key={student} className="result-card">
-            <h4>{student}</h4>
-            <div>avg: <b>{Number(sum.average_grade ?? 0).toFixed(2)}</b>/10</div>
-            <div>sanctions: {sum.sanctions ?? 0} · rewards: {sum.rewards ?? 0}</div>
-            <div className="muted small">
-              frust {sum.final_emotional_state?.frustration} · happy {sum.final_emotional_state?.happiness}
-            </div>
-            {sprint.newly_unlocked_achievements?.[student]?.length > 0 && (
-              <div className="result-badges">
-                {sprint.newly_unlocked_achievements[student].map(b => (
-                  <span key={b.key} className="result-badge" title={b.title} style={{ borderColor: b.color }}>
-                    {b.icon}
-                  </span>
-                ))}
-              </div>
-            )}
-          </div>
-        ))}
-      </div>
-    </div>
-  )
-}
-
-function BreakSummary({ breakData }) {
-  return (
-    <div>
-      <p className="muted small">
-        <code>{breakData.break_id}</code> · {breakData.conversation?.length} messages · forbidden: "{breakData.subject_forbidden}"
-      </p>
-      <div className="break-conversation">
-        {(breakData.conversation || []).map((m, i) => (
-          <div key={i} className={`break-msg ${m.comforted_peer ? 'comfort' : ''}`}>
-            <strong>{m.speaker}:</strong> {m.message}
-            {m.mentioned_subject && <span className="warn-tag">⚠ mentioned subject</span>}
-            {m.comforted_peer && <span className="ok-tag">🤗 comforted</span>}
-          </div>
-        ))}
-      </div>
-    </div>
   )
 }
