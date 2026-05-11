@@ -1,0 +1,30 @@
+/* ─────────────────────────────────────────────
+   STOP BUTTON — append to styles.css
+   ───────────────────────────────────────────── */
+
+.btn.stop {
+  background: var(--danger);
+  color: var(--bg);
+  border-color: var(--danger);
+  font-weight: 600;
+  animation: stop-pulse 2s ease-in-out infinite;
+}
+.btn.stop:hover:not(:disabled) {
+  filter: brightness(1.1);
+  animation: none;
+}
+.btn.stop:disabled {
+  opacity: 0.6;
+  animation: none;
+}
+@keyframes stop-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(201, 138, 138, 0.5); }
+  50%      { box-shadow: 0 0 0 8px rgba(201, 138, 138, 0); }
+}
+
+/* Smaller stop button inline in the live panel header */
+.btn-stop-inline {
+  padding: 5px 12px;
+  font-size: 11px;
+  margin-left: auto;
+}

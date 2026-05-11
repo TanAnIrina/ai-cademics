@@ -40,6 +40,7 @@ import database as db
 import achievements as ach
 # NEW IN V3: WebSocket streaming module
 import streaming as ws
+import live_state as live
 
 app = FastAPI(title="AI-cademics Backend", version="3.0")
 
@@ -420,6 +421,9 @@ def execute_sprint(subject: str, answer_timeout: int, sanction_threshold: int, r
     # NEW IN V3: broadcast sprint started
     ws.manager.broadcast_sync(ws.event_sprint_started(sprint_id, subject))
     
+    # LIVE: notify start
+    live.start_sprint(sprint_id, subject, total_questions=10, num_students=2)
+    
     sprint_data = {
         "sprint_id": sprint_id,
         "subject": subject,
@@ -433,8 +437,12 @@ def execute_sprint(subject: str, answer_timeout: int, sanction_threshold: int, r
         "newly_unlocked_achievements": {}  # NEW IN V2
     }
 
-    # Ensure this sprint id exists in DB for FK-referenced writes.
-    db.create_sprint_stub(sprint_id, subject, sprint_start.isoformat())
+    # NEW IN V1.1: pre-save sprint stub so FK-referenced inserts work mid-sprint
+    # (record_emotion, save_sprint, etc. all reference sprint_id as a FK)
+    try:
+        db.create_sprint_stub(sprint_id, subject, sprint_start.isoformat())
+    except Exception as e:
+        print(f"  ! Could not pre-save sprint stub: {e}")
     
     print("[1/4] Generating lesson...")
     lesson = teacher_generate_lesson(subject)
@@ -443,6 +451,8 @@ def execute_sprint(subject: str, answer_timeout: int, sanction_threshold: int, r
         return sprint_data
     sprint_data["lesson"] = lesson
     print(f"      Lesson generated ({len(lesson)} chars)\n")
+    
+    live.lesson_generated(len(lesson))
     
     # NEW IN V3: broadcast lesson complete
     ws.manager.broadcast_sync(ws.event_lesson_complete(lesson, sprint_id, subject))
@@ -456,6 +466,8 @@ def execute_sprint(subject: str, answer_timeout: int, sanction_threshold: int, r
     # NEW IN V3: broadcast questions
     ws.manager.broadcast_sync(ws.event_questions_generated(questions, sprint_id))
     print(f"      10 questions generated\n")
+    
+    live.questions_generated(len(questions))
     
     print("[3/4] Sending questions to students (with lesson context)...")
     student_names = [classroom_config["student_1_name"], classroom_config["student_2_name"]]
@@ -495,6 +507,7 @@ def execute_sprint(subject: str, answer_timeout: int, sanction_threshold: int, r
             
             if answer is None:
                 print(f"TIMEOUT")
+                live.tick_timeout(student_name, question_idx)
                 sprint_data["answers"][student_name].append({
                     "question_idx": question_idx, "question": question, "answer": None,
                     "grade": 0, "reasoning": "No answer (timeout)", "action": None
@@ -531,6 +544,8 @@ def execute_sprint(subject: str, answer_timeout: int, sanction_threshold: int, r
             
             action_str = f" [{action.get('type', '?')} {action.get('points', '?')}]" if action else ""
             print(f"Grade {grade}/10{action_str}")
+            
+            live.tick_answer(student_name, question_idx, question, grade, reasoning, action)
             
             sprint_data["answers"][student_name].append({
                 "question_idx": question_idx, "question": question, "answer": answer,
@@ -581,13 +596,15 @@ def execute_sprint(subject: str, answer_timeout: int, sanction_threshold: int, r
         
         for badge in all_new:
             print(f"  ACHIEVEMENT! {student_name} unlocked: {badge['title']}")
+            live.achievement_unlocked(student_name, badge)
             # NEW IN V3: broadcast achievement
             ws.manager.broadcast_sync(ws.event_achievement_unlocked(student_name, badge))
     
     # NEW IN V3: broadcast sprint completed
-    if not run_control["cancel_requested"]:
-        ws.manager.broadcast_sync(ws.event_sprint_completed(sprint_id, sprint_data["summary"]))
-    run_control["active_sprint_id"] = None
+    ws.manager.broadcast_sync(ws.event_sprint_completed(sprint_id, sprint_data["summary"]))
+    
+    # LIVE: notify completion so frontend exits 'sprint_running' state
+    live.end_sprint(sprint_id, sprint_data.get("summary", {}))
     
     return sprint_data
 
@@ -607,6 +624,7 @@ def run_sprint_sync(req: RunSprintRequest):
             db.delete_sprint_progress(sprint_data.get("sprint_id"))
             run_control["active_sprint_id"] = None
             run_control["cancel_requested"] = False
+            live.reset()  # LIVE: clear so frontend /api/live returns idle
             return {"status": "cancelled", "sprint_id": sprint_data.get("sprint_id")}
         
         # JSON file backup (still saved)
@@ -614,8 +632,10 @@ def run_sprint_sync(req: RunSprintRequest):
         with open(filename, "w", encoding="utf-8") as f:
             json.dump(sprint_data, f, indent=2, ensure_ascii=False)
         
+        live.end_session()  # LIVE: notify success completion -> idle
         return sprint_data
     except Exception as e:
+        live.reset()  # LIVE: clear on error too
         print(f"Sprint error: {e}")
         # Since it's background, can't raise HTTPException, just print
 
@@ -643,6 +663,10 @@ def reset_sprint(req: ResetSprintRequest = ResetSprintRequest()):
         db.delete_sprint_progress(active_sprint_id)
     run_control["active_sprint_id"] = None
     run_control["active_break_id"] = None
+
+    # LIVE: clear so /api/live returns idle immediately;
+    # the frontend's live panel will disappear on the next poll.
+    live.reset()
 
     if req.reset_emotions:
         for student in emotional_state:
@@ -682,6 +706,8 @@ def execute_break(rounds: int, timeout: int, sprint_id: Optional[str] = None) ->
           f"{student_2}={emotional_state[student_2]['frustration']}")
     print(f"{'='*60}\n")
     
+    live.start_break(break_id, total_rounds=rounds, forbidden_subject=subject)
+    
     # NEW IN V3: broadcast break started
     ws.manager.broadcast_sync(ws.event_break_started(break_id, sprint_id))
     
@@ -703,6 +729,9 @@ def execute_break(rounds: int, timeout: int, sprint_id: Optional[str] = None) ->
     break_data["conversation"].append({
         "round": 0, "speaker": student_1, "message": initial_message, "is_initial": True
     })
+    
+    live.tick_break_message(student_1, initial_message, mentioned_subject=False, comforted_peer=False)
+
     # NEW IN V3: broadcast initial message
     ws.manager.broadcast_sync(ws.event_break_message(student_1, initial_message, 0))
     
@@ -777,6 +806,8 @@ Now reply to {peer_name}. Remember:
             "comforted_peer": comforted_peer
         })
         
+        live.tick_break_message(current_speaker, message, mentioned_subject, comforted_peer)
+        
         break_data["evals"][current_speaker]["replies"] += 1
         if mentioned_subject:
             break_data["evals"][current_speaker]["mentioned_subject"] = True
@@ -826,9 +857,10 @@ Now reply to {peer_name}. Remember:
     print(f"{'='*60}\n")
     
     # NEW IN V3: broadcast break completed
-    if not run_control["cancel_requested"]:
-        ws.manager.broadcast_sync(ws.event_break_completed(break_id, break_data["evals_summary"]))
-    run_control["active_break_id"] = None
+    ws.manager.broadcast_sync(ws.event_break_completed(break_id, break_data["evals_summary"]))
+    
+    # LIVE: notify completion so frontend exits 'break_running' state
+    live.end_break(break_id)
     
     return break_data
 
@@ -844,13 +876,18 @@ def run_break_sync(req: RunBreakRequest):
     """Ruleaza pauza cu schimb de mesaje (US 3 + US 5) + DB save."""
     try:
         break_data = execute_break(req.rounds, req.timeout)
+        if break_data.get("cancelled"):
+            live.reset()  # LIVE: clear
+            return {"status": "cancelled"}
         
         filename = f"{SESSIONS_DIR}/break_{break_data['break_id']}.json"
         with open(filename, "w", encoding="utf-8") as f:
             json.dump(break_data, f, indent=2, ensure_ascii=False)
         
+        live.end_session()  # LIVE: notify success -> idle
         return break_data
     except Exception as e:
+        live.reset()  # LIVE: clear on error
         print(f"Break error: {e}")
 
 
@@ -895,6 +932,7 @@ def run_full_session_sync(req: RunFullSessionRequest):
     except Exception as e:
         full_session["errors"].append(f"Sprint failed: {e}")
         print(f"SPRINT FAILED: {e}")
+        live.end_session()  # NEW: notify frontend that we're done (with error)
     
     try:
         break_data = execute_break(req.break_rounds, req.break_timeout, sprint_id=sprint_id)
@@ -917,6 +955,11 @@ def run_full_session_sync(req: RunFullSessionRequest):
     
     # NEW IN V3: broadcast session completed
     ws.manager.broadcast_sync(ws.event_session_completed(session_id, full_session["duration_seconds"]))
+    
+    # LIVE: notify session completion so frontend exits running state
+    live.end_session()
+    
+    return full_session
 
 
 # =============================================================================
@@ -1021,6 +1064,12 @@ def get_sprint_detail(sprint_id: str):
     if not sprint:
         raise HTTPException(status_code=404, detail="Sprint not found")
     return sprint
+
+@app.get("/api/live")
+def get_live_state():
+    """Live progress for the currently running sprint/break/session.
+    Frontend polls this every ~1s while a sprint is running."""
+    return live.snapshot()
 
 
 @app.post("/api/db/reset")
