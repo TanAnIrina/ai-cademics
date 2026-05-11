@@ -32,6 +32,7 @@ export default function RunPage() {
   const [result, setResult]   = useState(null)
   const [error, setError]     = useState(null)
   const [live, setLive]       = useState(null)
+  const [sprintStarted, setSprintStarted] = useState(false)
 
   const pollRef = useRef(null)
 
@@ -71,9 +72,12 @@ export default function RunPage() {
     }
   }
 
-  const onSprint = () => withRunning('sprint', () =>
-    api.runSprint({ subject, answer_timeout: answerTimeout, sanction_threshold: sanctionThreshold, reward_threshold: rewardThreshold })
-  )
+  const onSprint = () => {
+    setSprintStarted(true)
+    return withRunning('sprint', () =>
+      api.runSprint({ subject, answer_timeout: answerTimeout, sanction_threshold: sanctionThreshold, reward_threshold: rewardThreshold })
+    )
+  }
   const onBreak = () => withRunning('break', () =>
     api.runBreak({ rounds: breakRounds, timeout: breakTimeout })
   )
@@ -93,6 +97,17 @@ export default function RunPage() {
     if (!confirm('Reset entire database? All sprints, badges and emotion history will be wiped.')) return
     try { await api.resetDatabase(); setResult({ action: 'reset_db', data: { ok: true } }) }
     catch (e) { setError(e) }
+  }
+  const onResetSprint = async () => {
+    const keepEmotions = confirm('Reset sprint state and keep current emotions?\nPress Cancel to reset emotions too.')
+    try {
+      await api.resetSprint(!keepEmotions)
+      setResult({ action: 'reset_sprint', data: { ok: true, reset_emotions: !keepEmotions } })
+      setLive(null)
+      setRunning(null)
+    } catch (e) {
+      setError(e)
+    }
   }
 
   return (
@@ -139,6 +154,11 @@ export default function RunPage() {
           <button className="btn accent"  onClick={onSession} disabled={!!running}>
             {running === 'session' ? 'Running session…' : '⚡ Full session (sprint + break)'}
           </button>
+          {sprintStarted && (
+            <button className="btn danger" onClick={onResetSprint} disabled={!!running}>
+              ■ Stop / Reset sprint
+            </button>
+          )}
         </div>
       </section>
 
@@ -291,8 +311,16 @@ function Field({ label, children, wide }) {
 function ResultView({ result }) {
   const { action, data } = result
 
-  if (action === 'reset' || action === 'reset_db') {
-    return <div className="card success-banner">✓ {action === 'reset_db' ? 'Database wiped.' : 'Emotions reset.'}</div>
+  if (action === 'reset' || action === 'reset_db' || action === 'reset_sprint') {
+    return (
+      <div className="card success-banner">
+        ✓ {action === 'reset_db'
+          ? 'Database wiped.'
+          : action === 'reset_sprint'
+            ? `Sprint reset${data?.reset_emotions ? ' (emotions reset too).' : '.'}`
+            : 'Emotions reset.'}
+      </div>
+    )
   }
   if (action === 'sprint' || (action === 'session' && data.sprint)) {
     const sprint = action === 'sprint' ? data : data.sprint

@@ -41,6 +41,7 @@ export const runBreak = ({ rounds=5, timeout=60 }) =>
   post("/api/break/run", { rounds, timeout });
 
 export const runFullSession = (cfg) => post("/api/session/run", cfg);
+export const resetSprint = (reset_emotions=false) => post("/api/sprint/reset", { reset_emotions });
 
 export const updateEmotion = (student_name, frustration_delta=0, happiness_delta=0) =>
   post("/api/emotions/update", { student_name, frustration_delta, happiness_delta });
