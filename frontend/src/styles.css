@@ -726,3 +726,202 @@ code { font-family: var(--font-mono); }
 .live-achievement-icon {
   font-size: 24px;
 }
+
+
+/* ─────────────────────────────────────────────
+   JOURNALS PAGE — append to styles.css
+   ───────────────────────────────────────────── */
+
+.journals-page {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.page-header {
+  margin-bottom: 20px;
+  display: flex; justify-content: space-between; align-items: flex-end;
+  flex-wrap: wrap; gap: 16px;
+}
+.page-header h2 { margin: 0; font-size: 24px; text-transform: none; letter-spacing: 0; color: var(--text); }
+.page-header p { margin: 4px 0 0; }
+
+.warn-text { color: var(--danger); }
+
+.tab-pills { display: flex; gap: 6px; flex-wrap: wrap; }
+.pill {
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  padding: 6px 14px;
+  border-radius: 100px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12px;
+  display: flex; align-items: center; gap: 6px;
+}
+.pill:hover { color: var(--text); }
+.pill.active { color: var(--text); border-color: currentColor; }
+.pill-accent.active { color: var(--accent); }
+.pill-count {
+  background: var(--bg);
+  padding: 1px 6px;
+  border-radius: 100px;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.journal-layout {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  gap: 20px;
+  align-items: start;
+}
+
+.journal-list {
+  display: flex; flex-direction: column; gap: 6px;
+  max-height: 75vh;
+  overflow-y: auto;
+}
+.journal-list-item {
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--border);
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+  padding: 12px 14px;
+  border-radius: 4px;
+  transition: all 0.15s;
+}
+.journal-list-item:hover { border-color: var(--accent-2); }
+.journal-list-item.active {
+  border-left-color: var(--accent);
+  background: var(--bg-elev-2);
+}
+.jli-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+.jli-subject { margin-bottom: 4px; font-family: var(--font-serif); }
+.jli-meta { font-size: 11px; }
+
+.warn-pill {
+  background: rgba(201,138,138,0.15);
+  color: var(--danger);
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 2px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.journal-reader { min-height: 400px; }
+
+.journal-paper-wrap {
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.journal-paper-header {
+  padding: 16px 20px;
+  background: var(--bg-elev-2);
+  border-bottom: 1px solid var(--border);
+  display: flex; justify-content: space-between; gap: 20px;
+  flex-wrap: wrap; align-items: flex-start;
+}
+.journal-paper-header h3 {
+  margin: 0 0 4px;
+  font-size: 16px;
+  color: var(--text);
+  text-transform: none; letter-spacing: 0;
+}
+.journal-paper-header code {
+  background: var(--bg);
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 11px;
+  color: var(--accent-2);
+}
+
+.word-meter { min-width: 180px; }
+.word-meter-label {
+  display: flex; justify-content: space-between;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 3px;
+}
+.word-meter-label > span:first-child { color: var(--text); font-size: 14px; }
+.word-meter-track {
+  height: 5px;
+  background: var(--bg);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.word-meter-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--success), var(--accent));
+  transition: width 0.3s;
+}
+.word-meter.over .word-meter-fill {
+  background: var(--danger);
+}
+
+.journal-paper {
+  background: #f4ead5;
+  color: #2a2018;
+  padding: 40px 50px;
+  min-height: 400px;
+  font-family: var(--font-serif);
+  font-size: 16px;
+  line-height: 1.75;
+}
+.journal-paper p {
+  margin: 0 0 1em;
+}
+.journal-paper p:last-child { margin-bottom: 0; }
+
+.empty-state {
+  text-align: center;
+  padding: 60px 20px;
+  color: var(--muted);
+}
+
+/* Responsive */
+@media (max-width: 900px) {
+  .journal-layout { grid-template-columns: 1fr; }
+  .journal-list { max-height: 300px; }
+  .journal-paper { padding: 24px 28px; }
+}
+
+
+/* ─────────────────────────────────────────────
+   STOP BUTTON — append to styles.css
+   ───────────────────────────────────────────── */
+
+.btn.stop {
+  background: var(--danger);
+  color: var(--bg);
+  border-color: var(--danger);
+  font-weight: 600;
+  animation: stop-pulse 2s ease-in-out infinite;
+}
+.btn.stop:hover:not(:disabled) {
+  filter: brightness(1.1);
+  animation: none;
+}
+.btn.stop:disabled {
+  opacity: 0.6;
+  animation: none;
+}
+@keyframes stop-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(201, 138, 138, 0.5); }
+  50%      { box-shadow: 0 0 0 8px rgba(201, 138, 138, 0); }
+}
+
+/* Smaller stop button inline in the live panel header */
+.btn-stop-inline {
+  padding: 5px 12px;
+  font-size: 11px;
+  margin-left: auto;
+}
