@@ -444,6 +444,13 @@ def execute_sprint(subject: str, answer_timeout: int, sanction_threshold: int, r
     except Exception as e:
         print(f"  ! Could not pre-save sprint stub: {e}")
     
+    # NEW IN V1.1: pre-save sprint stub so FK-referenced inserts work mid-sprint
+    # (record_emotion, save_sprint, etc. all reference sprint_id as a FK)
+    try:
+        db.create_sprint_stub(sprint_id, subject, sprint_start.isoformat())
+    except Exception as e:
+        print(f"  ! Could not pre-save sprint stub: {e}")
+    
     print("[1/4] Generating lesson...")
     lesson = teacher_generate_lesson(subject)
     if run_control["cancel_requested"]:
@@ -513,6 +520,8 @@ def execute_sprint(subject: str, answer_timeout: int, sanction_threshold: int, r
                     "grade": 0, "reasoning": "No answer (timeout)", "action": None
                 })
                 continue
+            
+            live.tick_timeout(student_name, question_idx)
             
             # NEW IN V3: broadcast answer received
             ws.manager.broadcast_sync(ws.event_answer_received(student_name, question_idx, answer))
@@ -605,6 +614,7 @@ def execute_sprint(subject: str, answer_timeout: int, sanction_threshold: int, r
     
     # LIVE: notify completion so frontend exits 'sprint_running' state
     live.end_sprint(sprint_id, sprint_data.get("summary", {}))
+
     
     return sprint_data
 
