@@ -35,6 +35,7 @@ export default function RunPage() {
   const [sprintStarted, setSprintStarted] = useState(false)
 
   const pollRef = useRef(null)
+  const runTokenRef = useRef(0)
 
   // Poll /api/live whenever something is running (and for a few seconds after,
   // to let the user see the final state)
@@ -61,13 +62,17 @@ export default function RunPage() {
   }, [running])
 
   async function withRunning(action, fn) {
+    const token = ++runTokenRef.current
     setRunning(action); setError(null); setResult(null); setLive(null)
     try {
       const r = await fn()
+      if (token !== runTokenRef.current) return
       setResult({ action, data: r })
     } catch (e) {
+      if (token !== runTokenRef.current) return
       setError(e)
     } finally {
+      if (token !== runTokenRef.current) return
       setRunning(null)
     }
   }
@@ -101,10 +106,13 @@ export default function RunPage() {
   const onResetSprint = async () => {
     const keepEmotions = confirm('Reset sprint state and keep current emotions?\nPress Cancel to reset emotions too.')
     try {
+      // Invalidate any in-flight run response so it cannot overwrite reset UI state.
+      runTokenRef.current += 1
       await api.resetSprint(!keepEmotions)
       setResult({ action: 'reset_sprint', data: { ok: true, reset_emotions: !keepEmotions } })
       setLive(null)
       setRunning(null)
+      setSprintStarted(false)
     } catch (e) {
       setError(e)
     }
@@ -155,7 +163,7 @@ export default function RunPage() {
             {running === 'session' ? 'Running session…' : '⚡ Full session (sprint + break)'}
           </button>
           {sprintStarted && (
-            <button className="btn danger" onClick={onResetSprint} disabled={!!running}>
+            <button className="btn danger" onClick={onResetSprint}>
               ■ Stop / Reset sprint
             </button>
           )}

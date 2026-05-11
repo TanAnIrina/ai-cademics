@@ -513,5 +513,29 @@ def reset_database():
     init_db()
 
 
+def delete_sprint_progress(sprint_id: Optional[str]):
+    """
+    Delete all DB records tied to a specific sprint id.
+    Used when a running sprint is cancelled/reset.
+    """
+    if not sprint_id:
+        return
+    with get_db() as conn:
+        # Delete break messages for breaks linked to this sprint
+        conn.execute("""
+            DELETE FROM messages
+            WHERE break_id IN (SELECT id FROM breaks WHERE sprint_id = ?)
+        """, (sprint_id,))
+        # Delete breaks linked to sprint
+        conn.execute("DELETE FROM breaks WHERE sprint_id = ?", (sprint_id,))
+        # Delete dependent rows
+        conn.execute("DELETE FROM actions WHERE sprint_id = ?", (sprint_id,))
+        conn.execute("DELETE FROM grades WHERE sprint_id = ?", (sprint_id,))
+        conn.execute("DELETE FROM emotions_history WHERE sprint_id = ?", (sprint_id,))
+        conn.execute("DELETE FROM achievements WHERE sprint_id = ?", (sprint_id,))
+        # Finally delete sprint row
+        conn.execute("DELETE FROM sprints WHERE id = ?", (sprint_id,))
+
+
 # Initialize on import
 init_db()

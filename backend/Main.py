@@ -79,6 +79,12 @@ emotional_state: Dict[str, dict] = {
     "Llama": {"frustration": 0, "happiness": 5},
 }
 
+run_control = {
+    "cancel_requested": False,
+    "active_sprint_id": None,
+    "active_break_id": None,
+}
+
 SESSIONS_DIR = "sessions_log"
 os.makedirs(SESSIONS_DIR, exist_ok=True)
 
@@ -333,6 +339,8 @@ def queue_student_task(student_name: str, prompt: str, mode: str = "classroom") 
 def wait_for_response(task_id: str, timeout: int = 60) -> Optional[str]:
     start = time.time()
     while time.time() - start < timeout:
+        if run_control["cancel_requested"]:
+            return None
         if task_id in responses:
             return responses[task_id]["answer"]
         time.sleep(0.5)
@@ -348,9 +356,10 @@ def update_emotion_after_grade(student_name: str, grade: int, sprint_id: str = "
     elif grade >= 8:
         emotional_state[student_name]["happiness"] = min(10, emotional_state[student_name]["happiness"] + 1)
     
-    # NEW: persist to DB
+    # NEW: persist to DB (skip if run was cancelled)
     state = emotional_state[student_name]
-    db.record_emotion(student_name, state["frustration"], state["happiness"], sprint_id, f"After grade {grade}")
+    if not run_control["cancel_requested"]:
+        db.record_emotion(student_name, state["frustration"], state["happiness"], sprint_id, f"After grade {grade}")
     # NEW IN V3: broadcast to WebSocket
     ws.manager.broadcast_sync(ws.event_emotion_updated(
         student_name, state["frustration"], state["happiness"], f"Got {grade}/10"
@@ -366,9 +375,10 @@ def update_emotion_after_action(student_name: str, action_type: str, sprint_id: 
     elif action_type == 'reward':
         emotional_state[student_name]["happiness"] = min(10, emotional_state[student_name]["happiness"] + 2)
     
-    # NEW: persist to DB
+    # NEW: persist to DB (skip if run was cancelled)
     state = emotional_state[student_name]
-    db.record_emotion(student_name, state["frustration"], state["happiness"], sprint_id, f"After {action_type}")
+    if not run_control["cancel_requested"]:
+        db.record_emotion(student_name, state["frustration"], state["happiness"], sprint_id, f"After {action_type}")
     # NEW IN V3: broadcast to WebSocket
     ws.manager.broadcast_sync(ws.event_emotion_updated(
         student_name, state["frustration"], state["happiness"], action_type
@@ -400,6 +410,8 @@ def check_uses_peer_name(text: str, peer_name: str) -> bool:
 def execute_sprint(subject: str, answer_timeout: int, sanction_threshold: int, reward_threshold: int) -> dict:
     sprint_id = str(uuid.uuid4())[:8]
     sprint_start = datetime.now()
+    run_control["cancel_requested"] = False
+    run_control["active_sprint_id"] = sprint_id
     
     print(f"\n{'='*60}")
     print(f"SPRINT START: {sprint_id} | Subject: {subject}")
@@ -420,9 +432,15 @@ def execute_sprint(subject: str, answer_timeout: int, sanction_threshold: int, r
         "errors": [],
         "newly_unlocked_achievements": {}  # NEW IN V2
     }
+
+    # Ensure this sprint id exists in DB for FK-referenced writes.
+    db.create_sprint_stub(sprint_id, subject, sprint_start.isoformat())
     
     print("[1/4] Generating lesson...")
     lesson = teacher_generate_lesson(subject)
+    if run_control["cancel_requested"]:
+        sprint_data["cancelled"] = True
+        return sprint_data
     sprint_data["lesson"] = lesson
     print(f"      Lesson generated ({len(lesson)} chars)\n")
     
@@ -431,6 +449,9 @@ def execute_sprint(subject: str, answer_timeout: int, sanction_threshold: int, r
     
     print("[2/4] Generating 10 questions based on lesson...")
     questions = teacher_generate_questions(subject, lesson=lesson)
+    if run_control["cancel_requested"]:
+        sprint_data["cancelled"] = True
+        return sprint_data
     sprint_data["questions"] = questions
     # NEW IN V3: broadcast questions
     ws.manager.broadcast_sync(ws.event_questions_generated(questions, sprint_id))
@@ -449,10 +470,16 @@ def execute_sprint(subject: str, answer_timeout: int, sanction_threshold: int, r
     
     print(f"[4/4] Waiting for answers (timeout: {answer_timeout}s)...\n")
     for student_name in student_names:
+        if run_control["cancel_requested"]:
+            sprint_data["cancelled"] = True
+            return sprint_data
         sprint_data["answers"][student_name] = []
         print(f"  --- {student_name} ---")
         
         for task_info in task_map[student_name]:
+            if run_control["cancel_requested"]:
+                sprint_data["cancelled"] = True
+                return sprint_data
             question_idx = task_info["question_idx"]
             question = task_info["question"]
             task_id = task_info["task_id"]
@@ -462,6 +489,9 @@ def execute_sprint(subject: str, answer_timeout: int, sanction_threshold: int, r
             
             print(f"  Q{question_idx+1}...", end=" ", flush=True)
             answer = wait_for_response(task_id, timeout=answer_timeout)
+            if run_control["cancel_requested"]:
+                sprint_data["cancelled"] = True
+                return sprint_data
             
             if answer is None:
                 print(f"TIMEOUT")
@@ -526,16 +556,19 @@ def execute_sprint(subject: str, answer_timeout: int, sanction_threshold: int, r
     sprint_data["ended_at"] = datetime.now().isoformat()
     sprint_data["duration_seconds"] = (datetime.now() - sprint_start).total_seconds()
     
-    # NEW: SAVE TO DATABASE
-    try:
-        db.save_sprint(sprint_data)
-        print(f"  -> Sprint saved to DB")
-    except Exception as e:
-        print(f"  ! DB save error: {e}")
-        sprint_data["errors"].append(f"DB save: {e}")
+    # NEW: SAVE TO DATABASE (skip if run cancelled)
+    if not run_control["cancel_requested"]:
+        try:
+            db.save_sprint(sprint_data)
+            print(f"  -> Sprint saved to DB")
+        except Exception as e:
+            print(f"  ! DB save error: {e}")
+            sprint_data["errors"].append(f"DB save: {e}")
     
     # NEW IN V2: CHECK ACHIEVEMENTS
     for student_name in student_names:
+        if run_control["cancel_requested"]:
+            break
         all_new = []
         # Sprint-specific achievements (perfect score, comeback, etc)
         sprint_aches = ach.check_sprint_achievements(student_name, sprint_data)
@@ -552,7 +585,9 @@ def execute_sprint(subject: str, answer_timeout: int, sanction_threshold: int, r
             ws.manager.broadcast_sync(ws.event_achievement_unlocked(student_name, badge))
     
     # NEW IN V3: broadcast sprint completed
-    ws.manager.broadcast_sync(ws.event_sprint_completed(sprint_id, sprint_data["summary"]))
+    if not run_control["cancel_requested"]:
+        ws.manager.broadcast_sync(ws.event_sprint_completed(sprint_id, sprint_data["summary"]))
+    run_control["active_sprint_id"] = None
     
     return sprint_data
 
@@ -562,6 +597,11 @@ def run_sprint(req: RunSprintRequest):
     """Ruleaza un sprint complet automat (US 2) - cu DB save."""
     try:
         sprint_data = execute_sprint(req.subject, req.answer_timeout, req.sanction_threshold, req.reward_threshold)
+        if sprint_data.get("cancelled"):
+            db.delete_sprint_progress(sprint_data.get("sprint_id"))
+            run_control["active_sprint_id"] = None
+            run_control["cancel_requested"] = False
+            return {"status": "cancelled", "sprint_id": sprint_data.get("sprint_id")}
         
         # JSON file backup (still saved)
         filename = f"{SESSIONS_DIR}/sprint_{sprint_data['sprint_id']}_{req.subject.replace(' ', '_')[:30]}.json"
@@ -582,11 +622,19 @@ def reset_sprint(req: ResetSprintRequest = ResetSprintRequest()):
     - raspunsuri task-uri
     Optional: reset emotii la baseline.
     """
+    run_control["cancel_requested"] = True
+    active_sprint_id = run_control.get("active_sprint_id")
+
     classroom_config["current_subject"] = None
     classroom_config["current_lesson"] = None
 
     task_queues.clear()
     responses.clear()
+
+    if active_sprint_id:
+        db.delete_sprint_progress(active_sprint_id)
+    run_control["active_sprint_id"] = None
+    run_control["active_break_id"] = None
 
     if req.reset_emotions:
         for student in emotional_state:
@@ -601,7 +649,9 @@ def reset_sprint(req: ResetSprintRequest = ResetSprintRequest()):
         "current_lesson_loaded": classroom_config["current_lesson"] is not None,
         "queued_students": list(task_queues.keys()),
         "responses_total": len(responses),
-        "emotions_reset": req.reset_emotions
+        "emotions_reset": req.reset_emotions,
+        "cancel_requested": True,
+        "deleted_sprint_id": active_sprint_id
     }
 
 
@@ -613,6 +663,7 @@ def execute_break(rounds: int, timeout: int, sprint_id: Optional[str] = None) ->
     """Studentii fac schimb de mesaje - alternativ."""
     break_id = str(uuid.uuid4())[:8]
     break_start = datetime.now()
+    run_control["active_break_id"] = break_id
     student_1 = classroom_config["student_1_name"]
     student_2 = classroom_config["student_2_name"]
     subject = classroom_config.get("current_subject", "the lesson")
@@ -650,6 +701,9 @@ def execute_break(rounds: int, timeout: int, sprint_id: Optional[str] = None) ->
     last_speaker = student_1
     
     for round_num in range(1, rounds * 2 + 1):
+        if run_control["cancel_requested"]:
+            break_data["cancelled"] = True
+            return break_data
         current_speaker = student_2 if last_speaker == student_1 else student_1
         peer_name = student_1 if current_speaker == student_2 else student_2
         
@@ -671,6 +725,9 @@ Now reply to {peer_name}. Remember:
         print(f"  [Round {round_num}] {current_speaker} responding...", end=" ", flush=True)
         
         message = wait_for_response(task_id, timeout=timeout)
+        if run_control["cancel_requested"]:
+            break_data["cancelled"] = True
+            return break_data
         
         if message is None:
             print(f"TIMEOUT")
@@ -690,8 +747,9 @@ Now reply to {peer_name}. Remember:
             emotional_state[peer_name]["frustration"] = max(0, emotional_state[peer_name]["frustration"] - 1)
             print(f"    [COMFORT] {current_speaker} comforted {peer_name} -> {peer_name} frustration -1")
             # NEW: record DB
-            db.record_emotion(peer_name, emotional_state[peer_name]["frustration"],
-                                emotional_state[peer_name]["happiness"], sprint_id, "Comforted by peer")
+            if not run_control["cancel_requested"]:
+                db.record_emotion(peer_name, emotional_state[peer_name]["frustration"],
+                                    emotional_state[peer_name]["happiness"], sprint_id, "Comforted by peer")
             # NEW IN V3: broadcast emotion update
             ws.manager.broadcast_sync(ws.event_emotion_updated(
                 peer_name, emotional_state[peer_name]["frustration"],
@@ -731,14 +789,17 @@ Now reply to {peer_name}. Remember:
     }
     
     # NEW: SAVE TO DATABASE
-    try:
-        db.save_break(break_data, sprint_id)
-        print(f"  -> Break saved to DB")
-    except Exception as e:
-        print(f"  ! DB save error: {e}")
+    if not run_control["cancel_requested"]:
+        try:
+            db.save_break(break_data, sprint_id)
+            print(f"  -> Break saved to DB")
+        except Exception as e:
+            print(f"  ! DB save error: {e}")
     
     # NEW IN V2: CHECK BREAK ACHIEVEMENTS
     for student_name in [student_1, student_2]:
+        if run_control["cancel_requested"]:
+            break
         peer = student_2 if student_name == student_1 else student_1
         new_aches = ach.check_break_achievements(student_name, break_data, peer)
         for badge in new_aches:
@@ -757,7 +818,9 @@ Now reply to {peer_name}. Remember:
     print(f"{'='*60}\n")
     
     # NEW IN V3: broadcast break completed
-    ws.manager.broadcast_sync(ws.event_break_completed(break_id, break_data["evals_summary"]))
+    if not run_control["cancel_requested"]:
+        ws.manager.broadcast_sync(ws.event_break_completed(break_id, break_data["evals_summary"]))
+    run_control["active_break_id"] = None
     
     return break_data
 
