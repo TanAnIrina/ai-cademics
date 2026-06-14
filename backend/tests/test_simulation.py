@@ -22,8 +22,11 @@ def test_simulation_produces_expected_records(client):
     lv = client.get(f"/api/classrooms/{cid}/live").json()
     # 2 students graded once per sprint
     assert len(lv["grades"]) == 2 * num_sprints
-    # 2 students journal once per sprint
-    assert len(lv["journals"]) == 2 * num_sprints
+    # 2 students + 1 teacher journal once per sprint
+    student_journals = [j for j in lv["journals"] if j["author_role"] == "student"]
+    teacher_journals = [j for j in lv["journals"] if j["author_role"] == "teacher"]
+    assert len(student_journals) == 2 * num_sprints
+    assert len(teacher_journals) == 1 * num_sprints
     assert len(lv["messages"]) > 0
     # grades are within range
     assert all(1 <= g["grade"] <= 10 for g in lv["grades"])
@@ -41,7 +44,8 @@ def test_finished_classroom_is_archived(client):
     archive = client.get(f"/api/history/{hist[0]['id']}").json()
     session = archive["session"]
     for key in ("classroom", "members", "transcript", "grades",
-                "sanctions", "journals", "evals", "observer_chat"):
+                "sanctions", "journals", "evals", "emotion_timeline",
+                "observer_chat"):
         assert key in session
     live = client.get(f"/api/classrooms/{cid}/live").json()
     assert len(session["transcript"]) == len(live["messages"])

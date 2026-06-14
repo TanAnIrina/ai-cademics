@@ -75,6 +75,10 @@ class MemberOut(BaseModel):
     role: str
     frustration: int
     happiness: int
+    confidence: int
+    curiosity: int
+    boredom: int
+    anxiety: int
 
 
 class ClassroomOut(BaseModel):
@@ -140,6 +144,7 @@ class GradeOut(BaseModel):
 class JournalOut(BaseModel):
     sprint_index: int
     student_name: str
+    author_role: str
     content: str
     word_count: int
 
@@ -165,6 +170,45 @@ class LiveView(BaseModel):
     grades: list[GradeOut]
     journals: list[JournalOut]
     evals: list[EvalOut]
+
+
+# ---------------------------------------------------------------------------
+# Statistics
+# ---------------------------------------------------------------------------
+class EmotionPoint(BaseModel):
+    sprint_index: int
+    slot: str
+    agent_name: str
+    happiness: int
+    frustration: int
+    confidence: int
+    curiosity: int
+    boredom: int
+    anxiety: int
+
+    class Config:
+        from_attributes = True
+
+
+class GradePoint(BaseModel):
+    sprint_index: int
+    student_name: str
+    grade: int
+
+
+class SanctionTally(BaseModel):
+    student_name: str
+    sanctions: int
+    rewards: int
+    net_points: int
+
+
+class StatsResponse(BaseModel):
+    classroom: ClassroomOut
+    emotion_names: list[str]
+    emotions: list[EmotionPoint]
+    grades: list[GradePoint]
+    sanctions: list[SanctionTally]
 
 
 # ---------------------------------------------------------------------------

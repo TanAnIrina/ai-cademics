@@ -51,7 +51,9 @@ export const api = {
   configureClassroom: (id, config) =>
     request(`/api/classrooms/${id}/configure`, { method: "POST", body: config, auth: true }),
   leaveClassroom: (id) => request(`/api/classrooms/${id}/leave`, { method: "POST", auth: true }),
+  deleteClassroom: (id) => request(`/api/classrooms/${id}`, { method: "DELETE", auth: true }),
   liveView: (id) => request(`/api/classrooms/${id}/live`),
+  classroomStats: (id) => request(`/api/classrooms/${id}/stats`),
   estimate: (sprint, brk, max) =>
     request(`/api/classrooms/estimate?sprint_minutes=${sprint}&break_minutes=${brk}&max_sprints=${max}`),
 

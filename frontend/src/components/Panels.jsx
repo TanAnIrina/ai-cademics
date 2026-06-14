@@ -92,6 +92,34 @@ export function Journals({ journals }) {
   );
 }
 
+// --- teacher journal ------------------------------------------------------
+export function TeacherJournal({ journals }) {
+  if (!journals || journals.length === 0)
+    return (
+      <Empty
+        icon="🧑‍🏫"
+        title="No teacher journal yet"
+        hint="The teacher reflects on the class at the end of each sprint."
+      />
+    );
+
+  return (
+    <div className="stack">
+      {journals.map((j) => (
+        <div className="journal teacher" key={j.id}>
+          <div className="spread">
+            <strong style={{ color: "var(--amber)" }}>{j.student_name} · teacher</strong>
+            <span className="faint mono" style={{ fontSize: 11.5 }}>
+              sprint {j.sprint_index} · {j.word_count} words
+            </span>
+          </div>
+          <div className="journal-body">{j.content}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // --- evals ----------------------------------------------------------------
 export function Evals({ evals }) {
   if (!evals || evals.length === 0)

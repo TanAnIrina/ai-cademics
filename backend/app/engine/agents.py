@@ -2,14 +2,17 @@
 
 The simulation engine talks to *agents*, not raw providers. An agent knows how
 to produce each kind of turn (lesson, questions, answer, grade, break chat,
-journal). Three implementations exist:
+journal, teacher journal). Three implementations exist:
 
 * ``MockAgent``      - deterministic, dependency-free, used by default and in CI.
 * ``LLMAgent``       - wraps a real provider client (Anthropic/OpenAI/Ollama).
 * ``ExternalAgent``  - delegates to a self-hosted agent that polls the backend
                        (the original AI-cademics runtime), via a task queue.
 
-All agents return data in the same shapes so the engine never branches on type.
+All agents share one interface so the engine never branches on type. Student
+turns receive a full ``emotions`` dict and an optional ``memory`` string (their
+own history from earlier sprints); break turns also receive ``peer_last`` (what
+the classmate just said) so replies actually acknowledge each other.
 """
 from __future__ import annotations
 
@@ -46,17 +49,21 @@ class BaseAgent:
     def sanction(self, student: str, answer: str, grade: int) -> dict | None:  # pragma: no cover
         raise NotImplementedError
 
-    # Student capabilities
-    def answer(self, question: str, lesson: str, subject: str,
-               frustration: int, happiness: int) -> str:  # pragma: no cover
+    def teacher_journal(self, subject: str, s1: str, s2: str, class_summary: str,
+                        emotions: dict, memory: str | None = None) -> str:  # pragma: no cover
         raise NotImplementedError
 
-    def break_turn(self, peer: str, subject: str, frustration: int,
-                   peer_frustration: int) -> str:  # pragma: no cover
+    # Student capabilities
+    def answer(self, question: str, lesson: str, subject: str,
+               emotions: dict, memory: str | None = None) -> str:  # pragma: no cover
+        raise NotImplementedError
+
+    def break_turn(self, peer: str, teacher: str, subject: str, emotions: dict,
+                   peer_last: str | None, memory: str | None = None) -> str:  # pragma: no cover
         raise NotImplementedError
 
     def journal(self, subject: str, peer: str, teacher: str,
-                frustration: int, happiness: int) -> str:  # pragma: no cover
+                emotions: dict, memory: str | None = None) -> str:  # pragma: no cover
         raise NotImplementedError
 
 
@@ -70,6 +77,24 @@ _SMALLTALK = [
     "Have you heard that new song everyone keeps humming? It's catchy.",
     "I really need a coffee refill before we head back inside.",
 ]
+
+
+def _dominant_emotion(emotions: dict) -> str:
+    """Return a short phrase for the strongest feeling, for mock tone."""
+    if not emotions:
+        return "calm"
+    # Negative feelings win ties so distress is never hidden.
+    order = ["frustration", "anxiety", "boredom", "confidence", "curiosity", "happiness"]
+    best = max(order, key=lambda k: (emotions.get(k, 0), -order.index(k)))
+    if emotions.get(best, 0) < 4:
+        return "calm"
+    return best
+
+
+def _mask_subject(text: str, subject: str) -> str:
+    for k in keywords(subject):
+        text = re.sub(rf"\b{re.escape(k)}\b", "stuff", text, flags=re.IGNORECASE)
+    return text
 
 
 def _concepts(subject: str) -> list[str]:
@@ -116,24 +141,30 @@ class MockAgent(BaseAgent):
         return qs
 
     def answer(self, question: str, lesson: str, subject: str,
-               frustration: int, happiness: int) -> str:
+               emotions: dict, memory: str | None = None) -> str:
         kw = sorted(keywords(question) | keywords(lesson))
         rng = self._rng(question)
         picked = rng.sample(kw, k=min(3, len(kw))) if kw else [subject]
-        tone = ""
-        if frustration >= 6:
-            tone = " Honestly this is a bit frustrating, but here goes."
-        elif happiness >= 7:
-            tone = " I'm really enjoying this topic!"
+        mood = _dominant_emotion(emotions)
+        tone = {
+            "frustration": " Honestly this is a bit frustrating, but here goes.",
+            "anxiety": " I'm not totally sure, I hope this is right…",
+            "boredom": " Anyway. Quick version:",
+            "confidence": " I've got this.",
+            "curiosity": " This part actually makes me wonder about more.",
+            "happiness": " I'm really enjoying this topic!",
+        }.get(mood, "")
+        recall = ""
+        if memory and rng.random() < 0.6:
+            recall = " Building on what stuck with me last time, "
         body = ", ".join(picked)
         return (
-            f"Regarding {subject}: {body}. {self.name} thinks the key idea is "
-            f"how {picked[0]} connects to the rest of the material.{tone}"
+            f"Regarding {subject}: {recall}{body}. {self.name} thinks the key idea "
+            f"is how {picked[0]} connects to the rest of the material.{tone}"
         )
 
     def grade(self, question: str, answer: str, subject: str) -> tuple[int, str]:
         rng = self._rng(question, answer)
-        # Longer, on-topic answers score higher; keep it in a believable band.
         overlap = len(keywords(question) & keywords(answer))
         base = 5 + min(4, overlap) + rng.randint(-1, 1)
         grade = max(1, min(10, base))
@@ -159,30 +190,72 @@ class MockAgent(BaseAgent):
             }
         return None
 
-    def break_turn(self, peer: str, subject: str, frustration: int,
-                   peer_frustration: int) -> str:
-        rng = self._rng("break", peer, str(frustration))
+    def teacher_journal(self, subject: str, s1: str, s2: str, class_summary: str,
+                        emotions: dict, memory: str | None = None) -> str:
+        mood = _dominant_emotion(emotions)
+        feel = {
+            "frustration": "a little exasperated",
+            "anxiety": "slightly worried about their progress",
+            "boredom": "wishing for sharper engagement",
+            "confidence": "confident in my plan",
+            "curiosity": "curious how they'll grow",
+            "happiness": "pleased with the room",
+        }.get(mood, "steady")
+        recall = ""
+        if memory:
+            recall = " Compared with my earlier note today, the rhythm is settling. "
+        return (
+            f"Teacher's journal — I am {self.name}. Today I taught {subject} to "
+            f"{s1} and {s2}. {class_summary} As their teacher I feel {feel}.{recall}"
+            f"Next sprint I want to ask sharper questions and check that both "
+            f"{s1} and {s2} stay with me on the harder parts of {subject}."
+        )
+
+    def break_turn(self, peer: str, teacher: str, subject: str, emotions: dict,
+                   peer_last: str | None, memory: str | None = None) -> str:
+        rng = self._rng("break", peer, str(emotions.get("frustration", 0)),
+                        peer_last or "")
+        opener = ""
+        if peer_last:
+            # Echo the substantive tail of the peer's line (not its opener), so
+            # replies read as genuine acknowledgement rather than recursive echo.
+            words = _mask_subject(peer_last, subject).split()
+            snippet = " ".join(words[-7:]).rstrip(".,!?")
+            opener = rng.choice([
+                f"Oh, \"{snippet}\" — same here, honestly. ",
+                f"Ha, {peer}, you're right about that. ",
+                f"Yeah, I get what you mean about {snippet}. ",
+                f"Right?? {snippet}... so true. ",
+            ])
         line = rng.choice(_SMALLTALK)
-        if peer_frustration >= 6:
-            line = f"Hey {peer}, don't worry, you did fine. " + line
-        # Defensive: never mention the subject during the break.
-        for k in keywords(subject):
-            line = re.sub(rf"\b{re.escape(k)}\b", "stuff", line, flags=re.IGNORECASE)
-        return line
+        if emotions.get("frustration", 0) >= 6:
+            opener = f"Hey {peer}, don't stress, you did fine. " + opener
+        return _mask_subject(opener + line, subject)
 
     def journal(self, subject: str, peer: str, teacher: str,
-                frustration: int, happiness: int) -> str:
-        mood = "calm and curious"
-        if frustration >= 6:
-            mood = "a little frustrated"
-        elif happiness >= 7:
-            mood = "genuinely happy"
+                emotions: dict, memory: str | None = None) -> str:
+        mood = _dominant_emotion(emotions)
+        mood_word = {
+            "frustration": "a little frustrated",
+            "anxiety": "anxious about the next test",
+            "boredom": "a bit restless",
+            "confidence": "quietly confident",
+            "curiosity": "curious to learn more",
+            "happiness": "genuinely happy",
+        }.get(mood, "calm and curious")
+        recall = ""
+        if memory:
+            recall = (
+                " Looking back at how I felt earlier today, my mood has shifted, "
+                "and I can see myself changing across these sprints. "
+            )
         return (
             f"Dear journal, I am {self.name}. Today I learned about {subject}. "
             f"In simple terms, {subject} is something I now understand a bit "
-            f"better thanks to {teacher}. I feel {mood} right now. "
-            f"My classmate {peer} was kind during the break, which helped. "
-            f"I want to keep practicing {subject} so the next test goes well."
+            f"better thanks to my teacher {teacher}. I feel {mood_word} right now."
+            f"{recall} My classmate {peer} (not the teacher) was kind during the "
+            f"break, which helped. I want to keep practising {subject} so the next "
+            f"test goes well."
         )
 
 
@@ -257,35 +330,54 @@ class LLMAgent(BaseAgent):
     def sanction(self, student: str, answer: str, grade: int) -> dict | None:
         return self._fallback.sanction(student, answer, grade)
 
-    def answer(self, question: str, lesson: str, subject: str,
-               frustration: int, happiness: int) -> str:
-        sys = prompts.student_classroom_prompt(
-            self.name, self.teacher_name, frustration, happiness
+    def teacher_journal(self, subject: str, s1: str, s2: str, class_summary: str,
+                        emotions: dict, memory: str | None = None) -> str:
+        sys = prompts.teacher_journal_prompt(
+            self.name, subject, s1, s2, class_summary, emotions, memory
         )
-        return self.client.chat(sys, f"Lesson:\n{lesson}\n\nAnswer: {question}")
+        try:
+            return self.client.chat(sys, "Write your teaching journal entry now.")
+        except Exception:
+            return self._fallback.teacher_journal(subject, s1, s2, class_summary,
+                                                  emotions, memory)
 
-    def break_turn(self, peer: str, subject: str, frustration: int,
-                   peer_frustration: int) -> str:
-        sys = prompts.student_break_prompt(self.name, peer, subject, frustration)
-        return self.client.chat(
-            sys, "Say one short, friendly sentence to your classmate."
+    def answer(self, question: str, lesson: str, subject: str,
+               emotions: dict, memory: str | None = None) -> str:
+        sys = prompts.student_classroom_prompt(
+            self.name, self.teacher_name, self.peer_name, emotions, memory
         )
+        try:
+            return self.client.chat(sys, f"Lesson:\n{lesson}\n\nAnswer: {question}")
+        except Exception:
+            return self._fallback.answer(question, lesson, subject, emotions, memory)
+
+    def break_turn(self, peer: str, teacher: str, subject: str, emotions: dict,
+                   peer_last: str | None, memory: str | None = None) -> str:
+        sys = prompts.student_break_prompt(
+            self.name, peer, teacher, subject, emotions, peer_last, memory
+        )
+        try:
+            return self.client.chat(sys, "Reply to your classmate now.")
+        except Exception:
+            return self._fallback.break_turn(peer, teacher, subject, emotions,
+                                             peer_last, memory)
 
     def journal(self, subject: str, peer: str, teacher: str,
-                frustration: int, happiness: int) -> str:
-        sys = prompts.student_journal_prompt(self.name, peer, teacher, subject)
-        return self.client.chat(sys, "Write the journal entry now.")
+                emotions: dict, memory: str | None = None) -> str:
+        sys = prompts.student_journal_prompt(
+            self.name, peer, teacher, subject, emotions, memory
+        )
+        try:
+            return self.client.chat(sys, "Write the journal entry now.")
+        except Exception:
+            return self._fallback.journal(subject, peer, teacher, emotions, memory)
 
 
 # ---------------------------------------------------------------------------
 # External (self-hosted) agent — uses the task-queue poll/submit endpoints
 # ---------------------------------------------------------------------------
 class ExternalAgent(BaseAgent):
-    """Delegates generation to a self-hosted agent process via the task queue.
-
-    This preserves the original AI-cademics deployment model where a student
-    runs their own model on their own machine and polls the backend.
-    """
+    """Delegates generation to a self-hosted agent process via the task queue."""
 
     def __init__(self, name: str, role: str, queue, teacher_name: str = "Teacher",
                  peer_name: str = "Classmate") -> None:
@@ -320,32 +412,39 @@ class ExternalAgent(BaseAgent):
     def sanction(self, student: str, answer: str, grade: int) -> dict | None:
         return self._fallback.sanction(student, answer, grade)
 
+    def teacher_journal(self, subject: str, s1: str, s2: str, class_summary: str,
+                        emotions: dict, memory: str | None = None) -> str:
+        sys = prompts.teacher_journal_prompt(
+            self.name, subject, s1, s2, class_summary, emotions, memory
+        )
+        out = self._ask(sys, "Write your teaching journal entry now.", "journal")
+        return out or self._fallback.teacher_journal(subject, s1, s2, class_summary,
+                                                     emotions, memory)
+
     def answer(self, question: str, lesson: str, subject: str,
-               frustration: int, happiness: int) -> str:
+               emotions: dict, memory: str | None = None) -> str:
         sys = prompts.student_classroom_prompt(
-            self.name, self.teacher_name, frustration, happiness
+            self.name, self.teacher_name, self.peer_name, emotions, memory
         )
         out = self._ask(sys, f"Lesson:\n{lesson}\nAnswer: {question}", "classroom")
-        return out or self._fallback.answer(
-            question, lesson, subject, frustration, happiness
-        )
+        return out or self._fallback.answer(question, lesson, subject, emotions, memory)
 
-    def break_turn(self, peer: str, subject: str, frustration: int,
-                   peer_frustration: int) -> str:
-        sys = prompts.student_break_prompt(self.name, peer, subject, frustration)
-        out = self._ask(sys, "Say one short friendly sentence to your classmate.",
-                        "break")
-        return out or self._fallback.break_turn(
-            peer, subject, frustration, peer_frustration
+    def break_turn(self, peer: str, teacher: str, subject: str, emotions: dict,
+                   peer_last: str | None, memory: str | None = None) -> str:
+        sys = prompts.student_break_prompt(
+            self.name, peer, teacher, subject, emotions, peer_last, memory
         )
+        out = self._ask(sys, "Reply to your classmate now.", "break")
+        return out or self._fallback.break_turn(peer, teacher, subject, emotions,
+                                                peer_last, memory)
 
     def journal(self, subject: str, peer: str, teacher: str,
-                frustration: int, happiness: int) -> str:
-        sys = prompts.student_journal_prompt(self.name, peer, teacher, subject)
-        out = self._ask(sys, "Write your journal entry now.", "journal")
-        return out or self._fallback.journal(
-            subject, peer, teacher, frustration, happiness
+                emotions: dict, memory: str | None = None) -> str:
+        sys = prompts.student_journal_prompt(
+            self.name, peer, teacher, subject, emotions, memory
         )
+        out = self._ask(sys, "Write your journal entry now.", "journal")
+        return out or self._fallback.journal(subject, peer, teacher, emotions, memory)
 
 
 # ---------------------------------------------------------------------------
@@ -364,6 +463,4 @@ def build_agent(name: str, role: str, provider: str, api_key: str | None,
         client = build_client(provider, api_key, model)
         return LLMAgent(name, role, client, teacher_name, peer_name)
     except Exception:
-        # If a real client cannot be constructed, degrade gracefully to mock so
-        # a misconfigured key never hard-crashes a whole classroom session.
         return MockAgent(name, role)

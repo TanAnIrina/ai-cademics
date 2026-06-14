@@ -115,7 +115,7 @@ export default function LoginPage() {
                 className="input mono"
                 placeholder={
                   provider === "anthropic"
-                    ? "claude-3-5-haiku-20241022"
+                    ? "claude-haiku-4-5-20251001"
                     : provider === "openai"
                       ? "gpt-4o-mini"
                       : "llama3"

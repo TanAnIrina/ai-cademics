@@ -61,3 +61,29 @@ export function timeAgo(iso) {
   if (hrs < 24) return `${hrs}h ago`;
   return `${Math.floor(hrs / 24)}d ago`;
 }
+
+// Emotion metadata shared by the seats panel and the statistics page.
+export const EMOTIONS = [
+  { key: "happiness", label: "Happiness", color: "var(--green)", icon: "😊" },
+  { key: "confidence", label: "Confidence", color: "var(--cyan)", icon: "💪" },
+  { key: "curiosity", label: "Curiosity", color: "var(--violet)", icon: "🤔" },
+  { key: "frustration", label: "Frustration", color: "var(--red)", icon: "😣" },
+  { key: "anxiety", label: "Anxiety", color: "var(--amber)", icon: "😬" },
+  { key: "boredom", label: "Boredom", color: "var(--amber-deep)", icon: "😐" },
+];
+
+// Compact set of labelled 0..10 meters for one agent's emotions.
+export function EmotionBars({ source, compact = false }) {
+  return (
+    <div className={`emo-grid ${compact ? "compact" : ""}`}>
+      {EMOTIONS.map((e) => (
+        <div className="emo" key={e.key} title={`${e.label}: ${source[e.key] ?? 0}/10`}>
+          <span className="faint" style={{ width: 16 }}>{e.icon}</span>
+          <span className="emo-bar">
+            <span style={{ width: `${(source[e.key] ?? 0) * 10}%`, background: e.color }} />
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}

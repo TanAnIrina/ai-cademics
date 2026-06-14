@@ -373,3 +373,13 @@ h1, h2, h3 { font-family: var(--font-display); font-weight: 600; letter-spacing:
 .sticky-side { position: sticky; top: 86px; }
 
 footer.foot { border-top: 1px solid var(--line); padding: 22px 0; color: var(--chalk-faint); font-size: 13px; margin-top: auto; }
+
+/* --- v2.1: richer emotions, teacher journal, stats page ------------------ */
+.emo-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 14px; }
+.emo-grid.compact { grid-template-columns: 1fr 1fr 1fr; gap: 5px 10px; }
+.emo-grid .emo-bar { width: 100%; }
+
+.journal.teacher { border-left-color: var(--amber); }
+
+.stats-grid { grid-template-columns: 1fr 1fr; }
+@media (max-width: 940px) { .stats-grid { grid-template-columns: 1fr; } }

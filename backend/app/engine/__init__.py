@@ -6,14 +6,17 @@ and a background thread executes the whole session:
     for each sprint:
         lesson  -> teacher teaches the subject
         test    -> teacher writes 10 questions; each student answers
-        grading -> teacher grades each student (+ optional sanction/reward),
-                   emotions updated
-        break   -> students chat (forbidden to mention the subject)
-        journal -> each student writes a <1000-word first-person entry
-        evals   -> deterministic checks recorded for each phase
+        grading -> teacher grades each student (+ optional sanction/reward);
+                   a full emotion vector is updated
+        break   -> students chat, each replying to what the other just said
+                   (forbidden to mention the subject)
+        journal -> each student, then the teacher, writes a <1000-word
+                   first-person entry; emotions are snapshotted for the stats view
 
-On completion the classroom is marked ``finished`` and an immutable JSON
-archive of the entire session is written for the history view.
+Agents carry **memory** across sprints (their previous journal + how they felt),
+so they evolve. A running session can be cooperatively **stopped** (used by the
+teacher's stop-and-delete action). On normal completion the classroom is marked
+``finished`` and an immutable JSON archive of the whole session is written.
 """
 from __future__ import annotations
 
@@ -39,13 +42,58 @@ settings = get_settings()
 _running: set[int] = set()
 _running_lock = threading.Lock()
 
+# Cooperative-stop signals, one Event per running classroom.
+_stop_events: dict[int, threading.Event] = {}
 
-def _pause() -> None:
+
+# --- stop control -----------------------------------------------------------
+def request_stop(classroom_id: int) -> None:
+    """Ask a running session to stop at the next phase boundary (best effort)."""
+    ev_ = _stop_events.get(classroom_id)
+    if ev_ is not None:
+        ev_.set()
+
+
+def _should_stop(classroom_id: int) -> bool:
+    ev_ = _stop_events.get(classroom_id)
+    return ev_ is not None and ev_.is_set()
+
+
+def _pause(classroom_id: int | None = None) -> None:
+    if classroom_id is not None and _should_stop(classroom_id):
+        return
     time.sleep(settings.sim_phase_seconds)
 
 
 def _clamp(v: int, lo: int = 0, hi: int = 10) -> int:
     return max(lo, min(hi, v))
+
+
+# --- emotion helpers --------------------------------------------------------
+def _emotions(m: models.Membership) -> dict[str, int]:
+    return {e: int(getattr(m, e)) for e in models.EMOTIONS}
+
+
+def _adjust(m: models.Membership, **deltas: int) -> None:
+    for emotion, delta in deltas.items():
+        setattr(m, emotion, _clamp(int(getattr(m, emotion)) + delta))
+
+
+def _emotion_summary(m: models.Membership) -> str:
+    return ", ".join(f"{e} {getattr(m, e)}/10" for e in models.EMOTIONS)
+
+
+def _snapshot(db: Session, cid: int, sprint: int, m: models.Membership) -> None:
+    db.add(models.EmotionSnapshot(
+        classroom_id=cid, sprint_index=sprint, slot=m.slot, agent_name=m.agent_name,
+        **{e: int(getattr(m, e)) for e in models.EMOTIONS},
+    ))
+    db.commit()
+
+
+def _excerpt(text: str, words: int = 55) -> str:
+    parts = text.split()
+    return " ".join(parts[:words]) + ("…" if len(parts) > words else "")
 
 
 def _agent_for(membership: models.Membership, queue: BoundQueue,
@@ -92,6 +140,7 @@ def _set_phase(db: Session, classroom: models.Classroom, phase: str,
 
 def run_session(classroom_id: int) -> None:
     """Entry point executed inside the background thread."""
+    _stop_events[classroom_id] = threading.Event()
     db = SessionLocal()
     try:
         classroom = db.get(models.Classroom, classroom_id)
@@ -111,6 +160,9 @@ def run_session(classroom_id: int) -> None:
         student_b = _agent_for(sb, bound_queue, teacher_m.agent_name, sa.agent_name)
         students = [(sa, student_a), (sb, student_b)]
 
+        # Per-agent memory carried across sprints (slot -> short summary string).
+        memory: dict[str, str] = {}
+
         subject = classroom.subject or "General Knowledge"
         classroom.status = models.STATUS_RUNNING
         classroom.started_at = datetime.now(UTC)
@@ -120,13 +172,26 @@ def run_session(classroom_id: int) -> None:
                      f"Session started. Teacher {teacher_m.agent_name} will teach "
                      f"'{subject}' across {classroom.num_sprints} sprint(s).")
 
+        # Baseline emotion snapshot (sprint 0) so charts show the starting point.
+        for m in (teacher_m, sa, sb):
+            _snapshot(db, classroom_id, 0, m)
+
         for sprint in range(1, classroom.num_sprints + 1):
+            if _should_stop(classroom_id):
+                break
+
             # --- LESSON -----------------------------------------------------
             _set_phase(db, classroom, models.PHASE_LESSON, sprint)
+            # A test is coming: a little anticipatory anxiety, lessons can bore.
+            for m, _a in students:
+                _adjust(m, anxiety=+1, boredom=+1)
+            db.commit()
             lesson = teacher.lesson(subject)
             _add_message(db, classroom_id, sprint, models.PHASE_LESSON,
                          teacher_m.agent_name, "teacher", lesson)
-            _pause()
+            _pause(classroom_id)
+            if _should_stop(classroom_id):
+                break
 
             # --- TEST: questions + answers ---------------------------------
             _set_phase(db, classroom, models.PHASE_TEST, sprint)
@@ -141,19 +206,24 @@ def run_session(classroom_id: int) -> None:
             joined_q = " ".join(questions)
             student_answers: dict[str, str] = {}
             for m, agent in students:
-                ans = agent.answer(joined_q, lesson, subject, m.frustration, m.happiness)
+                ans = agent.answer(joined_q, lesson, subject, _emotions(m),
+                                   memory.get(m.slot))
                 student_answers[m.agent_name] = ans
                 _add_message(db, classroom_id, sprint, models.PHASE_TEST,
                              m.agent_name, "student", ans)
                 _record_evals(db, classroom_id, sprint,
                               ev.eval_answer(f"{m.agent_name}_answer", joined_q, lesson, ans))
-            _pause()
+            _pause(classroom_id)
+            if _should_stop(classroom_id):
+                break
 
             # --- GRADING (+ sanctions, emotions) ---------------------------
             _set_phase(db, classroom, models.PHASE_GRADING, sprint)
+            sprint_grades: dict[str, int] = {}
             for m, _agent in students:
                 ans = student_answers[m.agent_name]
                 grade, reasoning = teacher.grade("Sprint test (10 questions)", ans, subject)
+                sprint_grades[m.agent_name] = grade
                 db.add(models.Grade(
                     classroom_id=classroom_id, sprint_index=sprint,
                     student_name=m.agent_name,
@@ -166,11 +236,15 @@ def run_session(classroom_id: int) -> None:
                 _record_evals(db, classroom_id, sprint,
                               ev.eval_grade(f"{m.agent_name}_grade", grade, reasoning))
 
-                # Emotion update from grade.
+                # Emotion update from the grade (a richer reaction).
                 if grade <= 4:
-                    m.frustration = _clamp(m.frustration + 2)
+                    _adjust(m, frustration=+2, anxiety=+1, confidence=-2,
+                            happiness=-1, boredom=+1)
                 elif grade >= 8:
-                    m.happiness = _clamp(m.happiness + 1)
+                    _adjust(m, happiness=+2, confidence=+2, curiosity=+1,
+                            anxiety=-2, frustration=-1, boredom=-2)
+                else:
+                    _adjust(m, confidence=+1, anxiety=-1, boredom=-1)
 
                 # Optional sanction / reward.
                 sanc = teacher.sanction(m.agent_name, ans, grade)
@@ -185,55 +259,109 @@ def run_session(classroom_id: int) -> None:
                                  f"[{sanc['type'].upper()} {sanc['points']:+d}] "
                                  f"{sanc['explanation']}")
                     if sanc["type"] == "sanction":
-                        m.frustration = _clamp(m.frustration + 3)
+                        _adjust(m, frustration=+3, happiness=-1, anxiety=+1, confidence=-1)
                     else:
-                        m.happiness = _clamp(m.happiness + 2)
+                        _adjust(m, happiness=+2, confidence=+1, curiosity=+1)
                 db.commit()
-            _pause()
 
-            # --- BREAK (off-topic chat, mutual comforting) -----------------
+            # Teacher reacts emotionally to how the class did.
+            if sprint_grades:
+                avg = sum(sprint_grades.values()) / len(sprint_grades)
+                if avg >= 8:
+                    _adjust(teacher_m, happiness=+1, confidence=+1, curiosity=+1)
+                elif avg <= 4:
+                    _adjust(teacher_m, frustration=+1, happiness=-1, anxiety=+1)
+                _adjust(teacher_m, boredom=+1)
+                db.commit()
+            _pause(classroom_id)
+            if _should_stop(classroom_id):
+                break
+
+            # --- BREAK (responsive off-topic chat, mutual comforting) ------
             _set_phase(db, classroom, models.PHASE_BREAK, sprint)
             break_texts: list[str] = []
+            last_by_slot: dict[str, str] = {}
             order = [(sa, student_a, sb), (sb, student_b, sa)]
             for turn in range(settings.break_turns):
                 m, agent, peer_m = order[turn % 2]
-                line = agent.break_turn(peer_m.agent_name, subject,
-                                        m.frustration, peer_m.frustration)
+                peer_last = last_by_slot.get(peer_m.slot)
+                line = agent.break_turn(peer_m.agent_name, teacher_m.agent_name,
+                                        subject, _emotions(m), peer_last,
+                                        memory.get(m.slot))
                 break_texts.append(line)
+                last_by_slot[m.slot] = line
                 _add_message(db, classroom_id, sprint, models.PHASE_BREAK,
                              m.agent_name, "student", line)
-                # Comforting reduces a highly-frustrated peer's frustration once.
+                # Comforting a highly-frustrated peer eases their distress.
                 if peer_m.frustration >= 6:
-                    peer_m.frustration = _clamp(peer_m.frustration - 2)
+                    _adjust(peer_m, frustration=-2, anxiety=-1, happiness=+1)
                     db.commit()
             _record_evals(db, classroom_id, sprint,
                           ev.eval_break("break_chat", subject, break_texts))
-            _pause()
+            _pause(classroom_id)
+            if _should_stop(classroom_id):
+                break
 
-            # --- JOURNAL ---------------------------------------------------
+            # --- JOURNAL (students + teacher) ------------------------------
             _set_phase(db, classroom, models.PHASE_JOURNAL, sprint)
             for m, agent in students:
                 peer_m = sb if m is sa else sa
                 entry = agent.journal(subject, peer_m.agent_name,
-                                      teacher_m.agent_name, m.frustration, m.happiness)
+                                      teacher_m.agent_name, _emotions(m), memory.get(m.slot))
                 db.add(models.Journal(
                     classroom_id=classroom_id, sprint_index=sprint,
-                    student_name=m.agent_name, content=entry,
-                    word_count=word_count(entry),
+                    student_name=m.agent_name, author_role=models.JOURNAL_STUDENT,
+                    content=entry, word_count=word_count(entry),
                 ))
                 _record_evals(db, classroom_id, sprint,
                               ev.eval_journal(f"{m.agent_name}_journal", entry, m.agent_name))
+                # Remember this journal + feelings for the next sprint.
+                memory[m.slot] = (
+                    f"Sprint {sprint}: you wrote — \"{_excerpt(entry)}\" "
+                    f"You felt: {_emotion_summary(m)}."
+                )
+
+            # Teacher's own reflection.
+            if sprint_grades:
+                summary = "; ".join(
+                    f"{name} scored {g}/10" for name, g in sprint_grades.items()
+                )
+            else:
+                summary = "the class completed the sprint"
+            t_entry = teacher.teacher_journal(
+                subject, sa.agent_name, sb.agent_name, summary,
+                _emotions(teacher_m), memory.get(teacher_m.slot),
+            )
+            db.add(models.Journal(
+                classroom_id=classroom_id, sprint_index=sprint,
+                student_name=teacher_m.agent_name, author_role=models.JOURNAL_TEACHER,
+                content=t_entry, word_count=word_count(t_entry),
+            ))
+            _record_evals(db, classroom_id, sprint,
+                          ev.eval_journal(f"{teacher_m.agent_name}_teacher_journal",
+                                          t_entry, teacher_m.agent_name))
+            memory[teacher_m.slot] = (
+                f"Sprint {sprint} reflection: \"{_excerpt(t_entry)}\" "
+                f"You felt: {_emotion_summary(teacher_m)}."
+            )
             db.commit()
-            _pause()
+
+            # End-of-sprint emotion snapshot for everyone.
+            for m in (teacher_m, sa, sb):
+                _snapshot(db, classroom_id, sprint, m)
+            _pause(classroom_id)
 
         # --- FINALISE -------------------------------------------------------
+        if _should_stop(classroom_id):
+            _set_phase(db, classroom, models.PHASE_STOPPED)
+            return  # a stop is followed by deletion; do not archive.
+
         _set_phase(db, classroom, models.PHASE_DONE)
         classroom.status = models.STATUS_FINISHED
         classroom.finished_at = datetime.now(UTC)
         db.commit()
         _archive(db, classroom)
     except Exception as exc:  # pragma: no cover - defensive
-        # Surface the failure in the transcript rather than dying silently.
         try:
             _add_message(db, classroom_id, 0, models.PHASE_DONE, "system",
                          "system", f"Session error: {exc}")
@@ -247,6 +375,7 @@ def run_session(classroom_id: int) -> None:
             pass
     finally:
         db.close()
+        _stop_events.pop(classroom_id, None)
         with _running_lock:
             _running.discard(classroom_id)
 
@@ -264,6 +393,8 @@ def _archive(db: Session, classroom: models.Classroom) -> None:
     evals = db.query(models.EvalResult).filter_by(classroom_id=cid).all()
     chat = db.query(models.ChatMessage).filter_by(classroom_id=cid).order_by(
         models.ChatMessage.id).all()
+    snaps = db.query(models.EmotionSnapshot).filter_by(classroom_id=cid).order_by(
+        models.EmotionSnapshot.id).all()
 
     payload = {
         "classroom": {
@@ -274,7 +405,7 @@ def _archive(db: Session, classroom: models.Classroom) -> None:
         },
         "members": [
             {"slot": m.slot, "agent_name": m.agent_name,
-             "frustration": m.frustration, "happiness": m.happiness}
+             **{e: int(getattr(m, e)) for e in models.EMOTIONS}}
             for m in classroom.memberships
         ],
         "transcript": [
@@ -293,12 +424,18 @@ def _archive(db: Session, classroom: models.Classroom) -> None:
         ],
         "journals": [
             {"sprint": j.sprint_index, "student": j.student_name,
-             "content": j.content, "word_count": j.word_count} for j in journals
+             "author_role": j.author_role, "content": j.content,
+             "word_count": j.word_count} for j in journals
         ],
         "evals": [
             {"sprint": e.sprint_index, "scope": e.scope, "check": e.check_name,
              "passed": e.passed, "score": e.score, "detail": e.detail}
             for e in evals
+        ],
+        "emotion_timeline": [
+            {"sprint": s.sprint_index, "slot": s.slot, "agent_name": s.agent_name,
+             **{e: int(getattr(s, e)) for e in models.EMOTIONS}}
+            for s in snaps
         ],
         "observer_chat": [
             {"nickname": c.nickname, "content": c.content,
@@ -342,7 +479,7 @@ def maybe_start(classroom_id: int) -> bool:
 
 
 def wait_until_finished(classroom_id: int, timeout: float = 30.0) -> bool:
-    """Test helper: block until the classroom thread completes."""
+    """Test helper / stop helper: block until the classroom thread completes."""
     deadline = time.time() + timeout
     while time.time() < deadline:
         with _running_lock:

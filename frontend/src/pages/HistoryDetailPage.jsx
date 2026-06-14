@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { api } from "../api";
 import { Loading, Empty } from "../components/ui.jsx";
-import { Transcript, Grades, Journals, Evals } from "../components/Panels.jsx";
+import { Transcript, Grades, Journals, TeacherJournal, Evals } from "../components/Panels.jsx";
 
 // The archive stores compact field names; map them onto the shapes the live
 // panels already know how to render (adding a synthetic id per row).
@@ -30,6 +30,7 @@ function adaptJournals(rows = []) {
     id: i,
     sprint_index: r.sprint,
     student_name: r.student,
+    author_role: r.author_role || "student",
     content: r.content,
     word_count: r.word_count,
   }));
@@ -88,6 +89,8 @@ export default function HistoryDetailPage() {
   const messages = adaptTranscript(s.transcript);
   const grades = adaptGrades(s.grades);
   const journals = adaptJournals(s.journals);
+  const studentJournals = journals.filter((j) => j.author_role !== "teacher");
+  const teacherJournals = journals.filter((j) => j.author_role === "teacher");
   const evals = adaptEvals(s.evals);
   const chat = s.observer_chat || [];
   const sanctions = s.sanctions || [];
@@ -95,14 +98,16 @@ export default function HistoryDetailPage() {
   const counts = {
     discussion: messages.length,
     grades: grades.length,
-    journals: journals.length,
+    student_journals: studentJournals.length,
+    teacher_journal: teacherJournals.length,
     evals: evals.length,
     chat: chat.length,
   };
   const tabs = [
     ["discussion", "Discussion"],
     ["grades", "Grades"],
-    ["journals", "Journals"],
+    ["student_journals", "Student Journals"],
+    ["teacher_journal", "Teacher Journal"],
     ["evals", "Evals"],
     ["chat", "Observer chat"],
   ];
@@ -184,7 +189,8 @@ export default function HistoryDetailPage() {
 
         {tab === "discussion" && <Transcript messages={messages} />}
         {tab === "grades" && <Grades grades={grades} />}
-        {tab === "journals" && <Journals journals={journals} />}
+        {tab === "student_journals" && <Journals journals={studentJournals} />}
+        {tab === "teacher_journal" && <TeacherJournal journals={teacherJournals} />}
         {tab === "evals" && <Evals evals={evals} />}
         {tab === "chat" &&
           (chat.length === 0 ? (
