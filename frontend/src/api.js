@@ -1,53 +1,66 @@
-// Schimbi DOAR aici dacă rulezi backendul pe alt IP/port.
-export const API_BASE = "http://localhost:8000";
+// Thin wrapper around the AI-cademics backend. All calls are same-origin
+// ("/api/..."): in dev, Vite proxies to :8000; in prod, nginx does.
 
-async function j(url, opts = {}) {
-  const r = await fetch(`${API_BASE}${url}`, {
-    headers: { "Content-Type": "application/json" },
-    ...opts,
-  });
-  if (!r.ok) {
-    const text = await r.text().catch(() => "");
-    throw new Error(`${r.status} ${url}: ${text || r.statusText}`);
-  }
-  return r.json();
+const TOKEN_KEY = "aicademics.token";
+
+export function getToken() {
+  return localStorage.getItem(TOKEN_KEY);
+}
+export function setToken(t) {
+  if (t) localStorage.setItem(TOKEN_KEY, t);
+  else localStorage.removeItem(TOKEN_KEY);
 }
 
-// ── GET ────────────────────────────────────────────────
-export const getRoot         = ()         => j("/");
-export const getLeaderboard  = ()         => j("/api/leaderboard");
-export const getStudents     = ()         => j("/api/students");
-export const getStudent      = (name)     => j(`/api/students/${name}`);
-export const getStudentBadges     = (name) => j(`/api/students/${name}/badges`);
-export const getStudentProgression= (name) => j(`/api/students/${name}/progression`);
-export const getStudentEmotionHistory = (name, limit = 100) =>
-  j(`/api/students/${name}/emotions/history?limit=${limit}`);
-export const getAchievements = ()         => j("/api/achievements");
-export const getStats        = ()         => j("/api/stats");
-export const getSprints      = (limit=20) => j(`/api/sprints?limit=${limit}`);
-export const getSprint       = (id)       => j(`/api/sprints/${id}`);
-export const getEmotions     = ()         => j("/api/emotions");
+async function request(path, { method = "GET", body, auth = false } = {}) {
+  const headers = {};
+  if (body !== undefined) headers["Content-Type"] = "application/json";
+  if (auth) {
+    const token = getToken();
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+  }
+  const res = await fetch(path, {
+    method,
+    headers,
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+  const text = await res.text();
+  const data = text ? JSON.parse(text) : null;
+  if (!res.ok) {
+    const detail = data && data.detail ? data.detail : res.statusText;
+    throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
+  }
+  return data;
+}
 
-// NEW: live progress
-export const getLive         = ()         => j("/api/live");
+export const api = {
+  // auth
+  login: (payload) => request("/api/auth/login", { method: "POST", body: payload }),
+  me: () => request("/api/auth/me", { auth: true }),
+  logout: () => request("/api/auth/logout", { method: "POST", auth: true }),
 
-// ── POST ───────────────────────────────────────────────
-const post = (url, body) => j(url, { method: "POST", body: JSON.stringify(body) });
+  // classrooms
+  listClassrooms: () => request("/api/classrooms"),
+  getClassroom: (id) => request(`/api/classrooms/${id}`),
+  createClassroom: (name) => request("/api/classrooms", { method: "POST", body: { name }, auth: true }),
+  joinClassroom: (id, config) =>
+    request(`/api/classrooms/${id}/join`, {
+      method: "POST",
+      body: config ? { config } : {},
+      auth: true,
+    }),
+  configureClassroom: (id, config) =>
+    request(`/api/classrooms/${id}/configure`, { method: "POST", body: config, auth: true }),
+  leaveClassroom: (id) => request(`/api/classrooms/${id}/leave`, { method: "POST", auth: true }),
+  liveView: (id) => request(`/api/classrooms/${id}/live`),
+  estimate: (sprint, brk, max) =>
+    request(`/api/classrooms/estimate?sprint_minutes=${sprint}&break_minutes=${brk}&max_sprints=${max}`),
 
-export const runSprint = ({ subject, answer_timeout=90, sanction_threshold=4, reward_threshold=8 }) =>
-  post("/api/sprint/run", { subject, answer_timeout, sanction_threshold, reward_threshold });
+  // chat
+  getChat: (id, afterId = 0) => request(`/api/classrooms/${id}/chat?after_id=${afterId}`),
+  postChat: (id, nickname, content) =>
+    request(`/api/classrooms/${id}/chat`, { method: "POST", body: { nickname, content } }),
 
-export const runBreak = ({ rounds=5, timeout=60 }) =>
-  post("/api/break/run", { rounds, timeout });
-
-export const runFullSession = (cfg) => post("/api/session/run", cfg);
-
-// Stop / reset current sprint — accepts { reset_emotions } object for consistency
-export const resetSprint = ({ reset_emotions = false } = {}) =>
-  post("/api/sprint/reset", { reset_emotions });
-
-export const updateEmotion = (student_name, frustration_delta=0, happiness_delta=0) =>
-  post("/api/emotions/update", { student_name, frustration_delta, happiness_delta });
-
-export const resetEmotions = () => post("/api/emotions/reset", {});
-export const resetDatabase = () => post("/api/db/reset", {});
+  // history
+  listHistory: () => request("/api/history"),
+  getArchive: (id) => request(`/api/history/${id}`),
+};
