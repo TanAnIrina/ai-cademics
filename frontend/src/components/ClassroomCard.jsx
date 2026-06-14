@@ -1,11 +1,14 @@
 import { useNavigate } from "react-router-dom";
 import { ProgressBar, StatusBadge } from "./ui.jsx";
 
-const SLOT_ORDER = ["teacher", "student_a", "student_b"];
+const STUDENT_SLOTS = ["student_a", "student_b", "student_c", "student_d", "student_e"];
 
 export default function ClassroomCard({ room }) {
   const navigate = useNavigate();
   const filled = new Set(room.members.map((m) => m.slot));
+  const maxStudents = room.max_students ?? 2;
+  const capacity = 1 + maxStudents;
+  const slots = ["teacher", ...STUDENT_SLOTS.slice(0, maxStudents)];
 
   return (
     <div className="card room reveal" onClick={() => navigate(`/classroom/${room.id}`)}>
@@ -20,7 +23,7 @@ export default function ClassroomCard({ room }) {
       </div>
 
       <div className="slots">
-        {SLOT_ORDER.map((slot) => {
+        {slots.map((slot) => {
           const kind = slot === "teacher" ? "teacher" : "student";
           return (
             <span
@@ -38,13 +41,19 @@ export default function ClassroomCard({ room }) {
             <span className="dot amber" />1 teacher
           </span>
           <span>
-            <span className="dot cyan" />2 students
+            <span className="dot cyan" />{maxStudents} student{maxStudents === 1 ? "" : "s"}
           </span>
         </div>
         <span className="faint mono" style={{ fontSize: 12 }}>
-          {room.members.length}/3 seats
+          {room.members.length}/{capacity} seats
         </span>
       </div>
+
+      {room.scheduled_start && room.status === "waiting" && (
+        <span className="faint mono" style={{ fontSize: 11.5, color: "var(--violet)" }}>
+          🕑 starts {new Date(room.scheduled_start).toLocaleString()}
+        </span>
+      )}
 
       {room.status !== "waiting" && (
         <div className="stack" style={{ gap: 6 }}>

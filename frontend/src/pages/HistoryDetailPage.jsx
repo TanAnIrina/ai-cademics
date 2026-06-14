@@ -3,6 +3,7 @@ import { useParams, Link } from "react-router-dom";
 import { api } from "../api";
 import { Loading, Empty } from "../components/ui.jsx";
 import { Transcript, Grades, Journals, TeacherJournal, Evals } from "../components/Panels.jsx";
+import StatsView from "../components/Stats.jsx";
 
 // The archive stores compact field names; map them onto the shapes the live
 // panels already know how to render (adding a synthetic id per row).
@@ -44,6 +45,38 @@ function adaptEvals(rows = []) {
     score: r.score,
     detail: r.detail,
   }));
+}
+// Archive uses compact keys; map the emotion timeline / grades / sanctions onto
+// the shape StatsView expects (so archived sessions get the same charts as live).
+function adaptEmotionTimeline(rows = []) {
+  return rows.map((r) => ({
+    sprint_index: r.sprint,
+    slot: r.slot,
+    agent_name: r.agent_name,
+    happiness: r.happiness,
+    frustration: r.frustration,
+    confidence: r.confidence,
+    curiosity: r.curiosity,
+    boredom: r.boredom,
+    anxiety: r.anxiety,
+  }));
+}
+function adaptGradePoints(rows = []) {
+  return rows.map((r) => ({
+    sprint_index: r.sprint,
+    student_name: r.student,
+    grade: r.grade,
+  }));
+}
+function tallySanctions(rows = []) {
+  const by = {};
+  rows.forEach((s) => {
+    const t = (by[s.student] ||= { student_name: s.student, sanctions: 0, rewards: 0, net_points: 0 });
+    if (s.type === "sanction") t.sanctions += 1;
+    else t.rewards += 1;
+    t.net_points += s.points;
+  });
+  return Object.values(by);
 }
 
 export default function HistoryDetailPage() {
@@ -94,12 +127,20 @@ export default function HistoryDetailPage() {
   const evals = adaptEvals(s.evals);
   const chat = s.observer_chat || [];
   const sanctions = s.sanctions || [];
+  const ratings = s.ratings || [];
+  const ratingAvg = ratings.length
+    ? Math.round((ratings.reduce((a, r) => a + r.stars, 0) / ratings.length) * 10) / 10
+    : 0;
+  const statEmotions = adaptEmotionTimeline(s.emotion_timeline);
+  const statGrades = adaptGradePoints(s.grades);
+  const statSanctions = tallySanctions(sanctions);
 
   const counts = {
     discussion: messages.length,
     grades: grades.length,
     student_journals: studentJournals.length,
     teacher_journal: teacherJournals.length,
+    statistics: statEmotions.length,
     evals: evals.length,
     chat: chat.length,
   };
@@ -108,6 +149,7 @@ export default function HistoryDetailPage() {
     ["grades", "Grades"],
     ["student_journals", "Student Journals"],
     ["teacher_journal", "Teacher Journal"],
+    ["statistics", "Statistics"],
     ["evals", "Evals"],
     ["chat", "Observer chat"],
   ];
@@ -129,7 +171,17 @@ export default function HistoryDetailPage() {
               <span className="tag">{archive.num_sprints} sprints</span>
             </div>
           </div>
-          <span className="badge finished">Archived</span>
+          <div className="row" style={{ gap: 10, alignItems: "center" }}>
+            <a
+              className="btn ghost sm"
+              href={api.archivePdfUrl(archive.id)}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              ⬇ Download PDF
+            </a>
+            <span className="badge finished">Archived</span>
+          </div>
         </div>
 
         {/* summary stats */}
@@ -176,6 +228,31 @@ export default function HistoryDetailPage() {
           </div>
         )}
 
+        {ratings.length > 0 && (
+          <div className="card card-pad reveal" style={{ marginBottom: 18 }}>
+            <div className="spread">
+              <span className="eyebrow">Lesson ratings</span>
+              <span className="mono" style={{ color: "var(--amber)" }}>
+                {"★".repeat(Math.round(ratingAvg))}
+                <span className="faint"> {ratingAvg}/5 · {ratings.length}</span>
+              </span>
+            </div>
+            <div className="stack" style={{ gap: 8, marginTop: 10 }}>
+              {ratings.map((r, i) => (
+                <div className="row" key={i} style={{ gap: 10 }}>
+                  <span className="tag" style={{ color: "var(--amber)" }}>
+                    {"★".repeat(r.stars)} {r.stars}/5
+                  </span>
+                  <strong style={{ color: "var(--cyan)" }}>{r.nickname}</strong>
+                  {r.comment && (
+                    <span className="muted" style={{ fontSize: 14 }}>{r.comment}</span>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         <hr className="chalk-rule" style={{ margin: "20px 0" }} />
 
         <div className="tabs">
@@ -191,6 +268,9 @@ export default function HistoryDetailPage() {
         {tab === "grades" && <Grades grades={grades} />}
         {tab === "student_journals" && <Journals journals={studentJournals} />}
         {tab === "teacher_journal" && <TeacherJournal journals={teacherJournals} />}
+        {tab === "statistics" && (
+          <StatsView emotions={statEmotions} grades={statGrades} sanctions={statSanctions} />
+        )}
         {tab === "evals" && <Evals evals={evals} />}
         {tab === "chat" &&
           (chat.length === 0 ? (

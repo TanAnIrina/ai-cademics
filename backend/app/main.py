@@ -12,7 +12,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .config import get_settings
 from .database import SessionLocal, init_db
-from .routers import agent, auth, chat, classrooms, history
+from .engine import start_scheduler
+from .routers import agent, auth, chat, classrooms, history, ratings
 from .seed import seed_classrooms
 
 
@@ -24,6 +25,7 @@ async def lifespan(app: FastAPI):
         seed_classrooms(db)
     finally:
         db.close()
+    start_scheduler()
     yield
 
 
@@ -51,6 +53,7 @@ def create_app() -> FastAPI:
     app.include_router(classrooms.router)
     app.include_router(chat.router)
     app.include_router(history.router)
+    app.include_router(ratings.router)
     app.include_router(agent.router)
 
     @app.get("/")

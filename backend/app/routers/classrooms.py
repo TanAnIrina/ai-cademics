@@ -21,7 +21,6 @@ _PHASE_ORDER = [
     models.PHASE_LESSON, models.PHASE_TEST, models.PHASE_GRADING,
     models.PHASE_BREAK, models.PHASE_JOURNAL,
 ]
-_ALL_SLOTS = [models.SLOT_TEACHER, models.SLOT_STUDENT_A, models.SLOT_STUDENT_B]
 
 
 def _progress(c: models.Classroom) -> float:
@@ -52,11 +51,13 @@ def classroom_out(c: models.Classroom) -> schemas.ClassroomOut:
             confidence=m.confidence, curiosity=m.curiosity,
             boredom=m.boredom, anxiety=m.anxiety,
         ))
-    free = [s for s in _ALL_SLOTS if s not in occupied]
+    active_slots = [models.SLOT_TEACHER, *models.student_slots(c.max_students)]
+    free = [s for s in active_slots if s not in occupied]
     return schemas.ClassroomOut(
         id=c.id, name=c.name, status=c.status, subject=c.subject,
         sprint_minutes=c.sprint_minutes, break_minutes=c.break_minutes,
-        num_sprints=c.num_sprints, current_sprint=c.current_sprint,
+        num_sprints=c.num_sprints, max_students=c.max_students,
+        scheduled_start=c.scheduled_start, current_sprint=c.current_sprint,
         phase=c.phase, members=members, free_slots=free, progress=round(_progress(c), 3),
     )
 
@@ -154,11 +155,14 @@ def join_classroom(
         c.sprint_minutes = req.config.sprint_minutes
         c.break_minutes = req.config.break_minutes
         c.num_sprints = req.config.num_sprints
+        c.max_students = req.config.num_students
+        c.scheduled_start = req.config.scheduled_start
         slot = models.SLOT_TEACHER
     else:
-        free_student = next((s for s in models.STUDENT_SLOTS if s not in occupied), None)
+        active = models.student_slots(c.max_students)
+        free_student = next((s for s in active if s not in occupied), None)
         if free_student is None:
-            raise HTTPException(409, "Both student slots are taken")
+            raise HTTPException(409, "All student seats are taken")
         slot = free_student
 
     db.add(models.Membership(
@@ -168,7 +172,7 @@ def join_classroom(
     db.commit()
     db.refresh(c)
 
-    if len(c.memberships) == 3:
+    if len(c.memberships) == 1 + c.max_students:
         maybe_start(c.id)
         db.refresh(c)
     return classroom_out(c)
@@ -191,8 +195,16 @@ def configure_classroom(
     c.sprint_minutes = config.sprint_minutes
     c.break_minutes = config.break_minutes
     c.num_sprints = config.num_sprints
+    # Don't shrink capacity below the students who have already taken a seat.
+    seated_students = sum(1 for m in c.memberships if m.slot != models.SLOT_TEACHER)
+    c.max_students = max(config.num_students, seated_students)
+    c.scheduled_start = config.scheduled_start
     db.commit()
     db.refresh(c)
+    # Applying a schedule/capacity change may make a full room eligible to start.
+    if len(c.memberships) == 1 + c.max_students:
+        maybe_start(c.id)
+        db.refresh(c)
     return classroom_out(c)
 
 
@@ -250,7 +262,7 @@ def _delete_classroom_rows(db: Session, cid: int) -> None:
     for model in (
         models.Message, models.Grade, models.Sanction, models.Journal,
         models.EvalResult, models.EmotionSnapshot, models.ChatMessage,
-        models.Archive, models.Membership,
+        models.LessonRating, models.Archive, models.Membership,
     ):
         db.query(model).filter_by(classroom_id=cid).delete(synchronize_session=False)
     db.query(models.Classroom).filter_by(id=cid).delete(synchronize_session=False)

@@ -48,8 +48,9 @@ export default function ClassroomsPage() {
           )}
         </div>
         <p className="lede reveal" style={{ animationDelay: "0.04s" }}>
-          Each room seats one teacher and two students. The session begins the moment all
-          three seats are taken, then runs timed sprints of lesson → test → grading → break → journal.
+          Each room seats one teacher and up to five students. The session begins once
+          every seat is taken (or at its scheduled time), then runs timed sprints of
+          lesson → test → grading → break → journal.
         </p>
 
         <hr className="chalk-rule" style={{ margin: "22px 0" }} />

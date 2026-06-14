@@ -49,7 +49,7 @@ class BaseAgent:
     def sanction(self, student: str, answer: str, grade: int) -> dict | None:  # pragma: no cover
         raise NotImplementedError
 
-    def teacher_journal(self, subject: str, s1: str, s2: str, class_summary: str,
+    def teacher_journal(self, subject: str, student_names: list[str], class_summary: str,
                         emotions: dict, memory: str | None = None) -> str:  # pragma: no cover
         raise NotImplementedError
 
@@ -190,7 +190,7 @@ class MockAgent(BaseAgent):
             }
         return None
 
-    def teacher_journal(self, subject: str, s1: str, s2: str, class_summary: str,
+    def teacher_journal(self, subject: str, student_names: list[str], class_summary: str,
                         emotions: dict, memory: str | None = None) -> str:
         mood = _dominant_emotion(emotions)
         feel = {
@@ -204,11 +204,12 @@ class MockAgent(BaseAgent):
         recall = ""
         if memory:
             recall = " Compared with my earlier note today, the rhythm is settling. "
+        roster = ", ".join(student_names) if student_names else "my students"
         return (
             f"Teacher's journal — I am {self.name}. Today I taught {subject} to "
-            f"{s1} and {s2}. {class_summary} As their teacher I feel {feel}.{recall}"
-            f"Next sprint I want to ask sharper questions and check that both "
-            f"{s1} and {s2} stay with me on the harder parts of {subject}."
+            f"{roster}. {class_summary} As their teacher I feel {feel}.{recall}"
+            f"Next sprint I want to ask sharper questions and check that {roster} "
+            f"stay with me on the harder parts of {subject}."
         )
 
     def break_turn(self, peer: str, teacher: str, subject: str, emotions: dict,
@@ -330,15 +331,15 @@ class LLMAgent(BaseAgent):
     def sanction(self, student: str, answer: str, grade: int) -> dict | None:
         return self._fallback.sanction(student, answer, grade)
 
-    def teacher_journal(self, subject: str, s1: str, s2: str, class_summary: str,
+    def teacher_journal(self, subject: str, student_names: list[str], class_summary: str,
                         emotions: dict, memory: str | None = None) -> str:
         sys = prompts.teacher_journal_prompt(
-            self.name, subject, s1, s2, class_summary, emotions, memory
+            self.name, subject, student_names, class_summary, emotions, memory
         )
         try:
             return self.client.chat(sys, "Write your teaching journal entry now.")
         except Exception:
-            return self._fallback.teacher_journal(subject, s1, s2, class_summary,
+            return self._fallback.teacher_journal(subject, student_names, class_summary,
                                                   emotions, memory)
 
     def answer(self, question: str, lesson: str, subject: str,
@@ -412,13 +413,13 @@ class ExternalAgent(BaseAgent):
     def sanction(self, student: str, answer: str, grade: int) -> dict | None:
         return self._fallback.sanction(student, answer, grade)
 
-    def teacher_journal(self, subject: str, s1: str, s2: str, class_summary: str,
+    def teacher_journal(self, subject: str, student_names: list[str], class_summary: str,
                         emotions: dict, memory: str | None = None) -> str:
         sys = prompts.teacher_journal_prompt(
-            self.name, subject, s1, s2, class_summary, emotions, memory
+            self.name, subject, student_names, class_summary, emotions, memory
         )
         out = self._ask(sys, "Write your teaching journal entry now.", "journal")
-        return out or self._fallback.teacher_journal(subject, s1, s2, class_summary,
+        return out or self._fallback.teacher_journal(subject, student_names, class_summary,
                                                      emotions, memory)
 
     def answer(self, question: str, lesson: str, subject: str,
