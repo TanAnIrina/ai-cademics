@@ -30,7 +30,3 @@
 - **Simptom:** după reset, sprintul repornit afișa date din rularea anterioară.
 - **Rezolvare:** serie de commit-uri pe `feature/reset_sprint` (`reset button`, `reset button 2/3`, `fixed`), integrate prin **PR #10**, care a inclus și rezolvarea unui conflict prin `Merge branch 'main' into feature/reset_sprint`.
 - **Prevenție:** în v2, ciclul de viață al sălii este un automat de stări explicit (`waiting → running → finished → archived`, vezi [`DIAGRAMS.md`](DIAGRAMS.md#3-diagrama-de-stări--ciclul-de-viață-al-unei-săli)), testat în `test_classrooms.py` și `test_simulation.py`.
-
-## Cum raportezi un bug nou
-
-Deschide un issue de tip **Bug report** — template-ul cere automat: versiunea, pașii de reproducere, comportamentul așteptat, comportamentul observat și logurile relevante. PR-ul de fix trebuie să conțină un test care reproduce bug-ul înainte de corectare.
