@@ -29,7 +29,7 @@ class AnthropicClient:
 
     def __init__(self, api_key: str, model: str | None = None) -> None:
         self.api_key = api_key
-        self.model = model or "claude-3-5-haiku-20241022"
+        self.model = model or "claude-haiku-4-5-20251001"
 
     def chat(self, system: str, user: str, *, want_json: bool = False) -> str:
         if want_json:

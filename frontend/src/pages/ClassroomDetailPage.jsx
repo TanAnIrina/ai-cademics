@@ -3,8 +3,8 @@ import { useParams, useNavigate, Link } from "react-router-dom";
 import { api } from "../api";
 import { useAuth } from "../auth.jsx";
 import { usePolling } from "../usePolling";
-import { Loading, Empty, StatusBadge, ProgressBar } from "../components/ui.jsx";
-import { Transcript, Grades, Journals, Evals } from "../components/Panels.jsx";
+import { Loading, Empty, StatusBadge, ProgressBar, EmotionBars } from "../components/ui.jsx";
+import { Transcript, Grades, Journals, TeacherJournal, Evals } from "../components/Panels.jsx";
 import SessionTimeChart from "../components/SessionTimeChart.jsx";
 import Chat from "../components/Chat.jsx";
 
@@ -13,9 +13,9 @@ const SLOT_LABEL = { teacher: "Teacher", student_a: "Student A", student_b: "Stu
 function Members({ members }) {
   if (!members.length) return <p className="faint">No one has joined yet.</p>;
   return (
-    <div className="stack" style={{ gap: 10 }}>
+    <div className="stack" style={{ gap: 14 }}>
       {members.map((m) => (
-        <div className="row spread" key={m.slot} style={{ gap: 10 }}>
+        <div className="stack" key={m.slot} style={{ gap: 6 }}>
           <div className="row" style={{ gap: 9 }}>
             <span className={`dot ${m.role === "teacher" ? "amber" : "cyan"}`} />
             <div>
@@ -25,20 +25,7 @@ function Members({ members }) {
               </div>
             </div>
           </div>
-          <div className="stack" style={{ gap: 4, alignItems: "flex-end" }}>
-            <div className="emo">
-              <span className="faint">😊</span>
-              <span className="emo-bar happy">
-                <span style={{ width: `${m.happiness * 10}%` }} />
-              </span>
-            </div>
-            <div className="emo">
-              <span className="faint">😣</span>
-              <span className="emo-bar frust">
-                <span style={{ width: `${m.frustration * 10}%` }} />
-              </span>
-            </div>
-          </div>
+          <EmotionBars source={m} compact />
         </div>
       ))}
     </div>
@@ -283,8 +270,11 @@ function JoinControls({ live, refresh }) {
 export default function ClassroomDetailPage() {
   const { id } = useParams();
   const cid = Number(id);
+  const { user } = useAuth();
+  const navigate = useNavigate();
   const { data: live, loading, error, refresh } = usePolling(() => api.liveView(cid), 2000, [cid]);
   const [tab, setTab] = useState("discussion");
+  const [deleting, setDeleting] = useState(false);
 
   if (loading && !live) return <div className="page"><div className="container"><Loading /></div></div>;
   if (error && !live)
@@ -302,16 +292,38 @@ export default function ClassroomDetailPage() {
     );
 
   const room = live.classroom;
+  const studentJournals = live.journals.filter((j) => j.author_role !== "teacher");
+  const teacherJournals = live.journals.filter((j) => j.author_role === "teacher");
+  const isOwnerTeacher =
+    user &&
+    user.role === "teacher" &&
+    room.members.some((m) => m.slot === "teacher" && m.display_name === user.display_name);
+
+  async function handleDelete() {
+    if (!window.confirm("Stop this classroom and permanently delete it? This cannot be undone."))
+      return;
+    setDeleting(true);
+    try {
+      await api.deleteClassroom(room.id);
+      navigate("/");
+    } catch (e) {
+      alert(e.message);
+      setDeleting(false);
+    }
+  }
+
   const counts = {
     discussion: live.messages.length,
     grades: live.grades.length,
-    journals: live.journals.length,
+    student_journals: studentJournals.length,
+    teacher_journal: teacherJournals.length,
     evals: live.evals.length,
   };
   const tabs = [
     ["discussion", "Discussion"],
     ["grades", "Grades"],
-    ["journals", "Journals"],
+    ["student_journals", "Student Journals"],
+    ["teacher_journal", "Teacher Journal"],
     ["evals", "Evals"],
   ];
 
@@ -326,12 +338,22 @@ export default function ClassroomDetailPage() {
           <div>
             <h1 className="h-page">{room.name}</h1>
             <div className="row wrap" style={{ gap: 10, marginTop: 8 }}>
+              <span
+                className="tag mono"
+                title="Use this id for the local-agent command: --classroom <id>"
+                style={{ color: "var(--cyan)", borderColor: "rgba(94,200,192,0.4)" }}
+              >
+                ID {room.id} · --classroom {room.id}
+              </span>
               <span className={`room-subject ${room.subject ? "" : "empty"}`}>
                 {room.subject || "no subject yet"}
               </span>
               <span className="tag">
                 {room.sprint_minutes}m sprint · {room.break_minutes}m break · {room.num_sprints} sprints
               </span>
+              <Link to={`/classroom/${room.id}/stats`} className="tag" style={{ textDecoration: "none" }}>
+                📊 Statistics
+              </Link>
             </div>
           </div>
           <StatusBadge status={room.status} />
@@ -368,7 +390,8 @@ export default function ClassroomDetailPage() {
 
             {tab === "discussion" && <Transcript messages={live.messages} />}
             {tab === "grades" && <Grades grades={live.grades} />}
-            {tab === "journals" && <Journals journals={live.journals} />}
+            {tab === "student_journals" && <Journals journals={studentJournals} />}
+            {tab === "teacher_journal" && <TeacherJournal journals={teacherJournals} />}
             {tab === "evals" && <Evals evals={live.evals} />}
           </div>
 
@@ -390,6 +413,22 @@ export default function ClassroomDetailPage() {
             <div className="card card-pad" style={{ minHeight: 360 }}>
               <Chat classroomId={cid} />
             </div>
+
+            {isOwnerTeacher && (
+              <div className="card card-pad">
+                <h3 className="h-sec" style={{ fontSize: 16, marginBottom: 6 }}>
+                  Teacher controls
+                </h3>
+                <p className="faint" style={{ fontSize: 12.5, margin: "0 0 12px" }}>
+                  {room.status === "running"
+                    ? "Stop the running session and delete this classroom and all its data."
+                    : "Permanently delete this classroom and all its data."}
+                </p>
+                <button className="btn danger block" disabled={deleting} onClick={handleDelete}>
+                  {deleting ? "Deleting…" : room.status === "running" ? "Stop & delete classroom" : "Delete classroom"}
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </div>

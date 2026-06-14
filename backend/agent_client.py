@@ -146,7 +146,12 @@ def main() -> None:
     p.add_argument("--interval", type=float, default=0.5, help="poll interval seconds")
     p.add_argument("--idle-timeout", type=float, default=120.0,
                    help="exit after this many seconds with no tasks")
-    run(p.parse_args())
+    args = p.parse_args()
+    # Normalise URLs so a trailing slash can't produce a double slash
+    # (e.g. "https://host/" + "/api/..." -> "https://host//api/...", a 404).
+    args.base = args.base.rstrip("/")
+    args.ollama = args.ollama.rstrip("/")
+    run(args)
 
 
 if __name__ == "__main__":

@@ -51,6 +51,17 @@ PHASE_GRADING = "grading"
 PHASE_BREAK = "break"
 PHASE_JOURNAL = "journal"
 PHASE_DONE = "done"
+PHASE_STOPPED = "stopped"
+
+# Emotions tracked per agent (each 0..10) -------------------------------------
+# Positive: happiness, confidence, curiosity. Negative: frustration, boredom,
+# anxiety. The engine evolves these from grades, sanctions, peer support and the
+# passage of sprints, and snapshots them each sprint for the statistics view.
+EMOTIONS = ("happiness", "frustration", "confidence", "curiosity", "boredom", "anxiety")
+
+# Journal authors --------------------------------------------------------------
+JOURNAL_STUDENT = "student"
+JOURNAL_TEACHER = "teacher"
 
 
 class User(Base):
@@ -102,8 +113,13 @@ class Membership(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
     slot: Mapped[str] = mapped_column(String(16), nullable=False)
     agent_name: Mapped[str] = mapped_column(String(80), nullable=False)
+    # Emotional state (each 0..10). See models.EMOTIONS.
     frustration: Mapped[int] = mapped_column(Integer, default=0)
     happiness: Mapped[int] = mapped_column(Integer, default=5)
+    confidence: Mapped[int] = mapped_column(Integer, default=5)
+    curiosity: Mapped[int] = mapped_column(Integer, default=5)
+    boredom: Mapped[int] = mapped_column(Integer, default=0)
+    anxiety: Mapped[int] = mapped_column(Integer, default=2)
     joined_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
     classroom: Mapped[Classroom] = relationship(back_populates="memberships")
@@ -161,8 +177,32 @@ class Journal(Base):
     classroom_id: Mapped[int] = mapped_column(ForeignKey("classrooms.id"))
     sprint_index: Mapped[int] = mapped_column(Integer, default=0)
     student_name: Mapped[str] = mapped_column(String(80))
+    # "student" | "teacher" — lets the UI split Student Journals / Teacher Journal.
+    author_role: Mapped[str] = mapped_column(String(16), default=JOURNAL_STUDENT)
     content: Mapped[str] = mapped_column(Text)
     word_count: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+
+class EmotionSnapshot(Base):
+    """An agent's emotional state captured at the end of one sprint.
+
+    Powers the statistics view's emotion-evolution charts.
+    """
+
+    __tablename__ = "emotion_snapshots"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    classroom_id: Mapped[int] = mapped_column(ForeignKey("classrooms.id"))
+    sprint_index: Mapped[int] = mapped_column(Integer, default=0)
+    slot: Mapped[str] = mapped_column(String(16))
+    agent_name: Mapped[str] = mapped_column(String(80))
+    happiness: Mapped[int] = mapped_column(Integer, default=0)
+    frustration: Mapped[int] = mapped_column(Integer, default=0)
+    confidence: Mapped[int] = mapped_column(Integer, default=0)
+    curiosity: Mapped[int] = mapped_column(Integer, default=0)
+    boredom: Mapped[int] = mapped_column(Integer, default=0)
+    anxiety: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
 

@@ -7,13 +7,13 @@ student slots, and the session auto-starts when all three are filled.
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy.orm import Session
 
 from .. import models, schemas
 from ..database import get_db
 from ..deps import current_user
-from ..engine import maybe_start
+from ..engine import maybe_start, request_stop, wait_until_finished
 
 router = APIRouter(prefix="/api/classrooms", tags=["classrooms"])
 
@@ -49,6 +49,8 @@ def classroom_out(c: models.Classroom) -> schemas.ClassroomOut:
             display_name=m.user.display_name if m.user else m.agent_name,
             role=m.user.role if m.user else "student",
             frustration=m.frustration, happiness=m.happiness,
+            confidence=m.confidence, curiosity=m.curiosity,
+            boredom=m.boredom, anxiety=m.anxiety,
         ))
     free = [s for s in _ALL_SLOTS if s not in occupied]
     return schemas.ClassroomOut(
@@ -240,4 +242,84 @@ def live_view(cid: int, db: Session = Depends(get_db)):
         grades=[schemas.GradeOut.model_validate(g) for g in grades],
         journals=[schemas.JournalOut.model_validate(j) for j in journals],
         evals=[schemas.EvalOut.model_validate(e) for e in evals],
+    )
+
+
+def _delete_classroom_rows(db: Session, cid: int) -> None:
+    """Remove a classroom and every row that references it (delete is permanent)."""
+    for model in (
+        models.Message, models.Grade, models.Sanction, models.Journal,
+        models.EvalResult, models.EmotionSnapshot, models.ChatMessage,
+        models.Archive, models.Membership,
+    ):
+        db.query(model).filter_by(classroom_id=cid).delete(synchronize_session=False)
+    db.query(models.Classroom).filter_by(id=cid).delete(synchronize_session=False)
+    db.commit()
+
+
+@router.delete("/{cid}", status_code=204)
+def delete_classroom(
+    cid: int,
+    user: models.User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    """Stop an active session (if running) and permanently delete the classroom.
+
+    Teacher-only: a teacher may delete a classroom they own (their teacher seat),
+    or any teacher-less room (e.g. an empty seeded room).
+    """
+    if user.role != models.ROLE_TEACHER:
+        raise HTTPException(403, "Only teachers can stop and delete classrooms")
+    c = _get_classroom(db, cid)
+    teacher_m = next((m for m in c.memberships if m.slot == models.SLOT_TEACHER), None)
+    if teacher_m is not None and teacher_m.user_id != user.id:
+        raise HTTPException(403, "Only this classroom's teacher can delete it")
+
+    # Stop a running session and give the engine thread a moment to wind down
+    # before we remove the rows it might still be writing to.
+    if c.status == models.STATUS_RUNNING:
+        request_stop(cid)
+        wait_until_finished(cid, timeout=5.0)
+
+    _delete_classroom_rows(db, cid)
+    return Response(status_code=204)
+
+
+@router.get("/{cid}/stats", response_model=schemas.StatsResponse)
+def classroom_stats(cid: int, db: Session = Depends(get_db)):
+    """Emotion evolution, grade trajectory and sanction tallies for the stats view."""
+    c = _get_classroom(db, cid)
+    snaps = (
+        db.query(models.EmotionSnapshot).filter_by(classroom_id=cid)
+        .order_by(models.EmotionSnapshot.sprint_index, models.EmotionSnapshot.id).all()
+    )
+    grades = (
+        db.query(models.Grade).filter_by(classroom_id=cid)
+        .order_by(models.Grade.sprint_index, models.Grade.id).all()
+    )
+    sanctions = db.query(models.Sanction).filter_by(classroom_id=cid).all()
+
+    tally: dict[str, dict] = {}
+    for s in sanctions:
+        t = tally.setdefault(s.student_name, {"sanctions": 0, "rewards": 0, "net": 0})
+        if s.type == "sanction":
+            t["sanctions"] += 1
+        else:
+            t["rewards"] += 1
+        t["net"] += s.points
+
+    return schemas.StatsResponse(
+        classroom=classroom_out(c),
+        emotion_names=list(models.EMOTIONS),
+        emotions=[schemas.EmotionPoint.model_validate(s) for s in snaps],
+        grades=[
+            schemas.GradePoint(sprint_index=g.sprint_index,
+                               student_name=g.student_name, grade=g.grade)
+            for g in grades
+        ],
+        sanctions=[
+            schemas.SanctionTally(student_name=name, sanctions=v["sanctions"],
+                                  rewards=v["rewards"], net_points=v["net"])
+            for name, v in tally.items()
+        ],
     )
