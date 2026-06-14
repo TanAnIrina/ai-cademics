@@ -14,6 +14,8 @@ import tempfile
 _TMP_DB = os.path.join(tempfile.gettempdir(), "aicademics_test.db")
 os.environ["AICADEMICS_DATABASE_URL"] = f"sqlite:///{_TMP_DB}"
 os.environ["AICADEMICS_SIM_PHASE_SECONDS"] = "0"
+os.environ["AICADEMICS_TIME_SCALE"] = "0"
+os.environ["AICADEMICS_SUBJECT_CHOICE_SECONDS"] = "0"
 os.environ["AICADEMICS_BREAK_TURNS"] = "2"
 os.environ["AICADEMICS_SEED_CLASSROOMS"] = "0"
 os.environ["AICADEMICS_SCHEDULER"] = "0"

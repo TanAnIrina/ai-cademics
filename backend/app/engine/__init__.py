@@ -1,11 +1,15 @@
 """Session simulation engine.
 
-When a classroom fills (1 teacher + 2 students) it transitions to ``running``
+When a classroom fills (1 teacher + N students) it transitions to ``running``
 and a background thread executes the whole session:
 
     for each sprint:
-        lesson  -> teacher teaches the subject
-        test    -> teacher writes 10 questions; each student answers
+        choose  -> (between sprints) the teacher picks the next subject
+        lesson  -> an interactive discussion: the teacher teaches a part, a
+                   student asks about it, the teacher answers; repeated for
+                   several segments and paced to span the chosen sprint length
+        test    -> teacher writes 10 questions of diverse formats; each student
+                   answers
         grading -> teacher grades each student (+ optional sanction/reward);
                    a full emotion vector is updated
         break   -> students chat, each replying to what the other just said
@@ -63,6 +67,62 @@ def _pause(classroom_id: int | None = None) -> None:
     if classroom_id is not None and _should_stop(classroom_id):
         return
     time.sleep(settings.sim_phase_seconds)
+
+
+def _sleep(seconds: float, classroom_id: int | None = None) -> None:
+    """Sleep for ``seconds`` but wake early if a stop is requested."""
+    if seconds <= 0:
+        return
+    end = time.monotonic() + seconds
+    while True:
+        remaining = end - time.monotonic()
+        if remaining <= 0:
+            return
+        if classroom_id is not None and _should_stop(classroom_id):
+            return
+        time.sleep(min(0.5, remaining))
+
+
+# --- between-sprint subject choice -----------------------------------------
+_subject_events: dict[int, threading.Event] = {}
+_subject_values: dict[int, str] = {}
+
+
+def submit_next_subject(classroom_id: int, subject: str) -> None:
+    """Teacher's choice for the next sprint; wakes the waiting engine thread."""
+    _subject_values[classroom_id] = subject
+    ev_ = _subject_events.get(classroom_id)
+    if ev_ is not None:
+        ev_.set()
+
+
+def is_choosing(classroom_id: int) -> bool:
+    return classroom_id in _subject_events
+
+
+def _await_subject(classroom_id: int, current: str) -> str:
+    """Block until the teacher picks the next subject, or keep ``current``.
+
+    Returns immediately with ``current`` when ``subject_choice_seconds`` is 0
+    (tests/demo) or on stop/timeout.
+    """
+    wait_s = settings.subject_choice_seconds
+    if wait_s <= 0:
+        return current
+    ev_ = threading.Event()
+    _subject_events[classroom_id] = ev_
+    _subject_values.pop(classroom_id, None)
+    try:
+        end = time.monotonic() + wait_s
+        while time.monotonic() < end:
+            if _should_stop(classroom_id):
+                break
+            if ev_.wait(timeout=min(0.5, max(0.0, end - time.monotonic()))):
+                break
+    finally:
+        _subject_events.pop(classroom_id, None)
+    chosen = (_subject_values.pop(classroom_id, None) or "").strip()
+    return chosen or current
 
 
 def _clamp(v: int, lo: int = 0, hi: int = 10) -> int:
@@ -188,16 +248,57 @@ def run_session(classroom_id: int) -> None:
             if _should_stop(classroom_id):
                 break
 
-            # --- LESSON -----------------------------------------------------
+            # --- CHOOSE NEXT SUBJECT (between sprints) ----------------------
+            if sprint > 1:
+                _set_phase(db, classroom, models.PHASE_CHOOSING, sprint)
+                subject = _await_subject(classroom_id, subject)
+                if _should_stop(classroom_id):
+                    break
+                classroom.subject = subject
+                db.commit()
+                _add_message(db, classroom_id, sprint, models.PHASE_IDLE, "system",
+                             "system", f"Sprint {sprint} subject: {subject}.")
+
+            # --- LESSON (interactive discussion, paced over ~sprint_minutes) -
             _set_phase(db, classroom, models.PHASE_LESSON, sprint)
             # A test is coming: a little anticipatory anxiety, lessons can bore.
             for m, _a in students:
                 _adjust(m, anxiety=+1, boredom=+1)
             db.commit()
-            lesson = teacher.lesson(subject)
-            _add_message(db, classroom_id, sprint, models.PHASE_LESSON,
-                         teacher_m.agent_name, "teacher", lesson)
-            _pause(classroom_id)
+
+            num_segments = max(2, min(6, classroom.sprint_minutes // 4))
+            total_msgs = 2 + 3 * num_segments  # intro + (teach+ask+reply)*segs + recap
+            lesson_seconds = classroom.sprint_minutes * 60 * settings.time_scale
+            per_msg = (lesson_seconds / total_msgs) if total_msgs else 0.0
+            discussion: list[str] = []
+
+            def _say(sender: str, role: str, text: str,
+                     _sprint: int = sprint, _per: float = per_msg,
+                     _disc: list = discussion) -> None:
+                _add_message(db, classroom_id, _sprint, models.PHASE_LESSON,
+                             sender, role, text)
+                _disc.append(text)
+                _sleep(_per, classroom_id)
+
+            _say(teacher_m.agent_name, "teacher",
+                 teacher.teach(subject, "intro", 0, num_segments, ""))
+            for seg_i in range(1, num_segments + 1):
+                if _should_stop(classroom_id):
+                    break
+                seg = teacher.teach(subject, "segment", seg_i, num_segments,
+                                    "\n".join(discussion))
+                _say(teacher_m.agent_name, "teacher", seg)
+                sm, sagent = students[(seg_i - 1) % len(students)]
+                q = sagent.ask_in_lesson(subject, seg, _emotions(sm), memory.get(sm.slot))
+                _say(sm.agent_name, "student", q)
+                _say(teacher_m.agent_name, "teacher",
+                     teacher.address_question(subject, q, seg))
+            if not _should_stop(classroom_id):
+                _say(teacher_m.agent_name, "teacher",
+                     teacher.teach(subject, "recap", num_segments, num_segments,
+                                   "\n".join(discussion)))
+
+            lesson = "\n".join(discussion)
             if _should_stop(classroom_id):
                 break
 
@@ -296,6 +397,10 @@ def run_session(classroom_id: int) -> None:
             last_line: str | None = None
             last_speaker: models.Membership | None = None
             n = len(students)
+            break_per_turn = (
+                classroom.break_minutes * 60 * settings.time_scale / settings.break_turns
+                if settings.break_turns else 0.0
+            )
             for turn in range(settings.break_turns):
                 m, agent = students[turn % n]
                 # Address whoever spoke immediately before (round-robin).
@@ -312,9 +417,9 @@ def run_session(classroom_id: int) -> None:
                     db.commit()
                 last_line = line
                 last_speaker = m
+                _sleep(break_per_turn, classroom_id)
             _record_evals(db, classroom_id, sprint,
                           ev.eval_break("break_chat", subject, break_texts))
-            _pause(classroom_id)
             if _should_stop(classroom_id):
                 break
 
@@ -393,6 +498,8 @@ def run_session(classroom_id: int) -> None:
     finally:
         db.close()
         _stop_events.pop(classroom_id, None)
+        _subject_events.pop(classroom_id, None)
+        _subject_values.pop(classroom_id, None)
         with _running_lock:
             _running.discard(classroom_id)
 

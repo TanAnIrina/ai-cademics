@@ -244,6 +244,10 @@ class RatingPost(BaseModel):
     sprint_index: int | None = None
 
 
+class NextSubject(BaseModel):
+    subject: str = Field(min_length=1, max_length=200)
+
+
 class RatingOut(BaseModel):
     id: int
     sprint_index: int | None

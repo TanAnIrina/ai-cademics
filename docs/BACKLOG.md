@@ -1,7 +1,7 @@
 # 📋 Product Backlog & User Stories
 
 > Acoperă cerința: **user stories (minim 10), backlog creation — 2 pct**.
-> **28 user stories pe 7 epics**, prioritizate MoSCoW, cu estimări în story points
+> **32 user stories pe 8 epics**, prioritizate MoSCoW, cu estimări în story points
 > și status. Backlog-ul a fost creat și rafinat cu ajutorul unui tool AI (Claude) —
 > vezi [`AI_USAGE_REPORT.md`](AI_USAGE_REPORT.md#1-backlog--user-stories) pentru prompturi.
 
@@ -13,6 +13,7 @@
 - [Epic 5: Observatori și arhivă](#epic-5-observatori-și-arhivă)
 - [Epic 6: Iterația v2.1 — interacțiune, memorie și analiză](#epic-6-iterația-v21--interacțiune-memorie-și-analiză)
 - [Epic 7: Iterația v2.2 — scalare, planificare și export](#epic-7-iterația-v22--scalare-planificare-și-export)
+- [Epic 8: Iterația v2.3 — lecție interactivă în timp real](#epic-8-iterația-v23--lecție-interactivă-în-timp-real)
 - [Tabelul de backlog](#tabelul-de-backlog)
 
 ---
@@ -200,6 +201,36 @@
 - **Criterii de acceptare:** profesorul primește un snapshot emoțional la fiecare sprint (alături de studenți); emoțiile profesorului evoluează din media notelor și din predarea repetată; pagina de statistici afișează un grafic dedicat profesorului.
 - **Implementare:** `backend/app/engine/__init__.py` (snapshot + reacția emoțională a profesorului), `frontend/src/components/Stats.jsx`
 
+## Epic 8: Iterația v2.3 — lecție interactivă în timp real
+
+> A patra iterație (Sprint 6): predarea devine o discuție secvențială desfășurată
+> proporțional cu timpul ales, testul se diversifică, iar profesorul alege subiectul
+> fiecărui sprint înainte ca acesta să înceapă.
+
+### US 29 — Sprint proporțional cu timpul ales
+**Ca** profesor, **vreau** ca predarea să se desfășoare pe toată durata aleasă (ex. 20 de minute), **astfel încât** sprintul să nu se „termine" în 2 secunde și să treacă imediat la test.
+- **Criterii de acceptare:** mesajele lecției sunt distribuite în timp astfel încât faza de predare să acopere ~`sprint_minutes` (multiplicate cu `time_scale`); pauza se întinde similar pe `break_minutes`; un `time_scale` mic comprimă sesiunea pentru demo/CI (testele folosesc 0 = instant); somnul e întreruptibil de stop.
+- **Implementare:** `backend/app/config.py` (`time_scale`), `backend/app/engine/__init__.py` (`_sleep`, ritmul per-mesaj al lecției și pauzei)
+- **Teste:** `backend/tests/test_v23_features.py`
+
+### US 30 — Lecție ca discuție secvențială profesor↔elevi
+**Ca** elev, **vreau** ca lecția să se construiască printr-un dialog (profesorul predă o parte, un elev întreabă, profesorul răspunde), **astfel încât** materia să fie predată pas cu pas, nu într-un singur bloc.
+- **Criterii de acceptare:** fiecare sprint produce intro + N segmente (predare + întrebare elev + răspuns profesor, în rotație) + recapitulare; numărul de segmente scalează cu durata sprintului; discuția acumulată e ceea ce stă la baza testului (contează ce s-a predat).
+- **Implementare:** `backend/app/engine/agents.py` (`teach`, `ask_in_lesson`, `address_question` în Base/Mock/LLM/External), `backend/app/engine/__init__.py` (bucla de lecție interactivă)
+- **Teste:** `backend/tests/test_v23_features.py` (`test_lesson_is_an_interactive_discussion`)
+
+### US 31 — Test diversificat
+**Ca** elev, **vreau** ca testul să conțină tipuri variate de întrebări, **astfel încât** evaluarea să nu fie 10 întrebări identice ca formă.
+- **Criterii de acceptare:** cele 10 întrebări folosesc formate diverse (definiție, exemplu, adevărat/fals, comparație, „de ce", aplicație, scenariu, limitare, rezumat într-o frază, completare); fiecare întrebare păstrează relevanța față de vocabularul lecției.
+- **Implementare:** `backend/app/engine/agents.py` (`_QUESTION_FORMS`, `_diverse_questions`, prompturi LLM/External actualizate)
+- **Teste:** `backend/tests/test_v23_features.py` (`test_test_questions_use_diverse_formats`)
+
+### US 32 — Alegerea subiectului înainte de fiecare sprint
+**Ca** profesor, **vreau** ca înainte de fiecare sprint următor să pot alege un subiect nou (sau să-l păstrez pe cel curent), cu un buton de subiect aleatoriu, **astfel încât** sesiunea să acopere teme diferite pe parcurs.
+- **Criterii de acceptare:** între sprinturi sesiunea se oprește în faza `choosing` și așteaptă profesorul; profesorul poate tasta un subiect, apăsa „🎲 Random" (subiect general din pool) sau păstra subiectul curent; după alegere sprintul pornește cu noul subiect; dacă profesorul nu alege în `subject_choice_seconds`, se păstrează subiectul curent.
+- **Implementare:** `backend/app/models.py` (`PHASE_CHOOSING`), `backend/app/engine/__init__.py` (`_await_subject`, `submit_next_subject`, `is_choosing`), `backend/app/routers/classrooms.py` (`GET /random-subject`, `POST /next-subject`), `backend/app/config.py` (`subject_choice_seconds`), `frontend/src/pages/ClassroomDetailPage.jsx` (`SubjectChooser`)
+- **Teste:** `backend/tests/test_v23_features.py` (`test_await_subject_returns_teacher_choice`, `test_random_subject_endpoint_returns_a_subject`, `test_next_subject_requires_teacher`, `test_next_subject_409_when_not_choosing`)
+
 ---
 
 ## Tabelul de backlog
@@ -236,5 +267,9 @@ Prioritizare prin metoda **MoSCoW**, estimare în story points (Fibonacci). Stat
 | US 26 | Rating de lecție (observatori) | 7 | Should | 3 | 5 | ✅ Done | ✅ |
 | US 25 | Programarea sesiunilor | 7 | Could | 5 | 5 | ✅ Done | ✅ |
 | US 28 | Emoțiile profesorului în statistici | 7 | Could | 2 | 5 | ✅ Done | — |
+| US 30 | Lecție ca discuție secvențială profesor↔elevi | 8 | Should | 8 | 6 | ✅ Done | ✅ |
+| US 29 | Sprint proporțional cu timpul ales | 8 | Should | 5 | 6 | ✅ Done | ✅ |
+| US 31 | Test diversificat | 8 | Should | 3 | 6 | ✅ Done | ✅ |
+| US 32 | Alegerea subiectului înainte de fiecare sprint | 8 | Should | 5 | 6 | ✅ Done | ✅ |
 
 **Backlog viitor (nepreluat încă):** WebSockets în loc de polling (push live, latență mai mică), rating de lecție per sprint (nu doar pe sală), export PDF cu grafice randate ca imagini, programare recurentă a sesiunilor, integrare cu un model de limbaj pentru rezumarea automată a sesiunii.

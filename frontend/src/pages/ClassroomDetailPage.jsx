@@ -26,6 +26,100 @@ function toLocalInput(iso) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
+const PHASE_LABEL = {
+  idle: "getting ready",
+  lesson: "lesson",
+  test: "test",
+  grading: "grading",
+  break: "break",
+  journal: "journal",
+  choosing: "choosing next subject",
+  done: "done",
+  stopped: "stopped",
+};
+
+// Shown between sprints: the teacher picks the next sprint's subject (or keeps the
+// current one) and the paused session resumes.
+function SubjectChooser({ classroomId, currentSubject, isOwnerTeacher }) {
+  const [subject, setSubject] = useState(currentSubject || "");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+
+  if (!isOwnerTeacher) {
+    return (
+      <div className="card card-pad reveal" style={{ borderColor: "rgba(124,108,246,0.5)" }}>
+        <span className="eyebrow" style={{ color: "var(--violet)" }}>Between sprints</span>
+        <p className="muted" style={{ margin: "8px 0 0" }}>
+          The teacher is choosing the subject for the next sprint…
+        </p>
+      </div>
+    );
+  }
+
+  async function rollRandom() {
+    setErr(null);
+    try {
+      const { subject: s } = await api.randomSubject(classroomId);
+      setSubject(s);
+    } catch (e) {
+      setErr(e.message);
+    }
+  }
+
+  async function start(useSubject) {
+    const chosen = (useSubject ?? subject).trim();
+    if (!chosen) return setErr("Pick a subject (or keep the current one).");
+    setBusy(true);
+    setErr(null);
+    try {
+      await api.nextSubject(classroomId, chosen);
+      // polling picks up the resumed session; no local state change needed
+    } catch (e) {
+      setErr(e.message);
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="card card-pad reveal" style={{ borderColor: "rgba(124,108,246,0.6)" }}>
+      <span className="eyebrow" style={{ color: "var(--violet)" }}>Between sprints</span>
+      <h3 className="h-sec" style={{ margin: "6px 0 2px" }}>Choose the subject for the next sprint</h3>
+      <p className="faint" style={{ fontSize: 13, margin: "0 0 12px" }}>
+        Keep teaching <strong>{currentSubject}</strong>, type a new subject, or roll a random one.
+      </p>
+      <div className="row wrap" style={{ gap: 8 }}>
+        <input
+          className="input"
+          value={subject}
+          maxLength={200}
+          placeholder="Next subject…"
+          onChange={(e) => setSubject(e.target.value)}
+          style={{ flex: "1 1 240px" }}
+        />
+        <button className="btn ghost" disabled={busy} onClick={rollRandom}>
+          🎲 Random
+        </button>
+      </div>
+      {err && <p style={{ color: "var(--red)", margin: "10px 0 0", fontSize: 13 }}>{err}</p>}
+      <div className="row wrap" style={{ gap: 10, marginTop: 14 }}>
+        <button className="btn primary" disabled={busy} onClick={() => start()}>
+          {busy ? "Starting…" : "Start sprint with this subject"}
+        </button>
+        <button
+          className="btn ghost"
+          disabled={busy}
+          onClick={() => {
+            setSubject(currentSubject || "");
+            start(currentSubject || "");
+          }}
+        >
+          Keep “{currentSubject}”
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function Members({ members }) {
   if (!members.length) return <p className="faint">No one has joined yet.</p>;
   return (
@@ -416,9 +510,19 @@ export default function ClassroomDetailPage() {
             <ProgressBar value={room.progress} cyan={room.status === "running"} />
             <span className="faint mono" style={{ fontSize: 12 }}>
               {room.status === "running"
-                ? `sprint ${room.current_sprint}/${room.num_sprints} · phase: ${room.phase}`
+                ? `sprint ${room.current_sprint}/${room.num_sprints} · phase: ${PHASE_LABEL[room.phase] || room.phase}`
                 : "session complete — archived to history"}
             </span>
+          </div>
+        )}
+
+        {room.phase === "choosing" && room.status === "running" && (
+          <div style={{ margin: "14px 0 0" }}>
+            <SubjectChooser
+              classroomId={room.id}
+              currentSubject={room.subject}
+              isOwnerTeacher={isOwnerTeacher}
+            />
           </div>
         )}
 

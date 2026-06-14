@@ -32,10 +32,10 @@ a session archive, Docker delivery and CI/CD.
 
 | Cerință | Punctaj | Unde se găsește |
 |---------|---------|-----------------|
-| User stories (minim 10) + backlog | 2 pct | [`docs/BACKLOG.md`](docs/BACKLOG.md) — 28 user stories pe 7 epics + tabel de backlog (MoSCoW, story points, status) |
+| User stories (minim 10) + backlog | 2 pct | [`docs/BACKLOG.md`](docs/BACKLOG.md) — 32 user stories pe 8 epics + tabel de backlog (MoSCoW, story points, status) |
 | Diagrame (UML, arhitectură, workflowuri) | 1 pct | [`docs/DIAGRAMS.md`](docs/DIAGRAMS.md) — 6 diagrame Mermaid: componente, clase, stări, 2× secvență, CI/CD |
 | Source control cu git (branches, merge, PRs, ≥5 commits/student) | 1 pct | [`docs/GIT_WORKFLOW.md`](docs/GIT_WORKFLOW.md) — 11 branch-uri, 5 PR-uri documentate, statistici commits/student |
-| Teste automate (inclusiv evals pentru agenți) | 2 pct | [`docs/TESTING.md`](docs/TESTING.md) — 54 teste pytest + evals deterministe per agent, rulate în CI |
+| Teste automate (inclusiv evals pentru agenți) | 2 pct | [`docs/TESTING.md`](docs/TESTING.md) — 61 teste pytest + evals deterministe per agent, rulate în CI |
 | Raportare bug + rezolvare cu pull request | 1 pct | [`docs/BUG_REPORTS.md`](docs/BUG_REPORTS.md) — 3 bug-uri documentate cu PR-uri + template de issue |
 | Pipeline CI/CD | 1 pct | [`.github/workflows/ci.yml`](.github/workflows/ci.yml) (lint + teste + build) și [`deploy.yml`](.github/workflows/deploy.yml) (imagini Docker + deploy opțional pe VPS) |
 | Raport despre folosirea toolurilor AI | 2 pct | [`docs/AI_USAGE_REPORT.md`](docs/AI_USAGE_REPORT.md) — pe fiecare etapă, cu prompturi, limite și lecții |
@@ -44,7 +44,7 @@ a session archive, Docker delivery and CI/CD.
 
 ## 📋 Product Backlog
 
-**28 user stories pe 7 epics**, prioritizate MoSCoW. Sprinturile 1–3 au livrat produsul de bază (v2); Sprintul 4 iterația de rafinare (v2.1); Sprintul 5 scalarea și exportul (v2.2). Criteriile de acceptare complete și mapările la cod/teste sunt în [`docs/BACKLOG.md`](docs/BACKLOG.md).
+**32 user stories pe 8 epics**, prioritizate MoSCoW. Sprinturile 1–3 au livrat produsul de bază (v2); Sprintul 4 iterația de rafinare (v2.1); Sprintul 5 scalarea și exportul (v2.2); Sprintul 6 lecția interactivă în timp real (v2.3). Criteriile de acceptare complete și mapările la cod/teste sunt în [`docs/BACKLOG.md`](docs/BACKLOG.md).
 
 **Epics**
 1. **Acces și gestionarea profilului** — login, roluri (profesor / student / observator), profil.
@@ -54,6 +54,7 @@ a session archive, Docker delivery and CI/CD.
 5. **Observatori și arhivă** — chat de observator, istoric și arhivă completă.
 6. **Iterația v2.1** — dialog responsiv în pauză, memorie între sprinturi, emoții extinse, statistici, stop & delete, jurnal de profesor.
 7. **Iterația v2.2** — până la 5 studenți per sală, programarea sesiunilor, rating de lecție, export PDF, statistici păstrate în istoric.
+8. **Iterația v2.3** — lecție ca discuție secvențială desfășurată în timp real, test diversificat, alegerea subiectului înainte de fiecare sprint.
 
 | ID | User story | Epic | MoSCoW | Pts | Sprint | Status |
 |----|------------|------|--------|-----|--------|--------|
@@ -85,6 +86,10 @@ a session archive, Docker delivery and CI/CD.
 | US 26 | Rating de lecție (observatori) | 7 | Should | 3 | 5 | ✅ |
 | US 25 | Programarea sesiunilor | 7 | Could | 5 | 5 | ✅ |
 | US 28 | Emoțiile profesorului în statistici | 7 | Could | 2 | 5 | ✅ |
+| US 30 | Lecție ca discuție secvențială | 8 | Should | 8 | 6 | ✅ |
+| US 29 | Sprint proporțional cu timpul ales | 8 | Should | 5 | 6 | ✅ |
+| US 31 | Test diversificat | 8 | Should | 3 | 6 | ✅ |
+| US 32 | Alegerea subiectului per sprint | 8 | Should | 5 | 6 | ✅ |
 
 ---
 
@@ -94,8 +99,16 @@ a session archive, Docker delivery and CI/CD.
   **anonymous observer**. API keys are held in server memory only, never persisted.
 - **Classrooms** — every room seats **1 teacher + 2–5 students** and starts the moment
   all seats fill, or at a **scheduled start time** the teacher sets.
-- **Live everything** — discussion, grades with reasoning, student **and teacher**
-  first-person journals, six per-seat emotions and eval results, all polled live.
+- **Live everything** — the lesson is a **sequential discussion** (the teacher
+  teaches a part, a student asks, the teacher answers), paced to span the chosen
+  sprint length, plus grades with reasoning, student **and teacher** journals, six
+  per-seat emotions and eval results, all polled live.
+- **Real-time pacing** — a 20-minute sprint's teaching actually unfolds over ~20
+  minutes (configurable via `time_scale`), instead of finishing instantly.
+- **Diversified tests** — each 10-question test mixes formats (definition, example,
+  true/false, compare, why, application, scenario, limitation, …).
+- **Per-sprint subjects** — between sprints the teacher picks the next subject (type
+  one, keep the current, or roll a **random** general topic) before it begins.
 - **Six dynamic emotions** — happiness, frustration, confidence, curiosity, boredom and
   anxiety evolve from grades, sanctions, peer support and the passage of sprints, for
   students **and the teacher**.
@@ -217,7 +230,7 @@ ai-cademics/
 │   │   ├── routers/           # auth, classrooms, chat, history, agent
 │   │   └── engine/            # agents, prompts, providers, evals, queue
 │   ├── agent_client.py        # standalone self-hosted agent
-│   └── tests/                 # 54 pytest tests
+│   └── tests/                 # 61 pytest tests
 ├── frontend/
 │   └── src/                   # pages, components, api.js, auth.jsx, usePolling.js
 ├── .github/workflows/         # ci.yml, deploy.yml  ·  .github/ISSUE_TEMPLATE/, PR template
@@ -246,6 +259,8 @@ enforce roles.
 | GET | `/api/classrooms/{id}/stats` | Emotion evolution, grade trajectory, sanction tallies |
 | GET/POST | `/api/classrooms/{id}/chat` | Observer chatroom |
 | GET/POST | `/api/classrooms/{id}/ratings` | Observer lesson ratings (1–5 stars) |
+| GET | `/api/classrooms/{id}/random-subject` | A random general subject (the 🎲 button) |
+| POST | `/api/classrooms/{id}/next-subject` | Teacher picks the next sprint's subject (resumes the paused session) |
 | GET | `/api/history` · `/api/history/{id}` | Archived sessions |
 | GET | `/api/history/{id}/pdf` | PDF export of an archived session |
 | GET/POST | `/api/agent/poll` · `/api/agent/submit` | Self-hosted agent protocol |
@@ -274,7 +289,7 @@ generates a reply locally, and submits it. This replaces the original
 ## ✅ Testing & CI/CD
 
 ```bash
-make test     # 54 pytest tests (full simulation runs via the mock provider)
+make test     # 61 pytest tests (full simulation runs via the mock provider)
 make lint     # ruff
 make build    # production frontend build
 ```
@@ -302,6 +317,8 @@ Everything is environment-driven (prefix `AICADEMICS_`). See `.env.example`:
 | `AICADEMICS_DEFAULT_SPRINT_MINUTES` / `_BREAK_MINUTES` / `_NUM_SPRINTS` | `20` / `10` / `2` | Teacher defaults |
 | `AICADEMICS_BREAK_TURNS` | `4` | Turns of break-time small talk |
 | `AICADEMICS_SCHEDULER` | `1` | Background ticker that starts scheduled rooms (set `0` to disable) |
+| `AICADEMICS_TIME_SCALE` | `1.0` | Real-time multiplier for the lesson/break (a 20-min sprint ≈ 20 min; lower to compress demos, tests use `0`) |
+| `AICADEMICS_SUBJECT_CHOICE_SECONDS` | `180` | How long the engine waits between sprints for the teacher to pick the next subject before keeping the current one (`0` = don't pause) |
 
 ---
 

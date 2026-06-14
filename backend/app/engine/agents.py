@@ -35,7 +35,13 @@ class BaseAgent:
         self.role = role
 
     # Teacher capabilities
-    def lesson(self, subject: str) -> str:  # pragma: no cover - overridden
+    def teach(self, subject: str, kind: str, index: int, total: int,
+              prior: str) -> str:  # pragma: no cover - overridden
+        """One teaching turn. kind is "intro", "segment" or "recap"."""
+        raise NotImplementedError
+
+    def address_question(self, subject: str, question: str,
+                         segment: str) -> str:  # pragma: no cover
         raise NotImplementedError
 
     def questions(self, subject: str, lesson: str) -> list[str]:  # pragma: no cover
@@ -54,6 +60,10 @@ class BaseAgent:
         raise NotImplementedError
 
     # Student capabilities
+    def ask_in_lesson(self, subject: str, segment: str, emotions: dict,
+                      memory: str | None = None) -> str:  # pragma: no cover
+        raise NotImplementedError
+
     def answer(self, question: str, lesson: str, subject: str,
                emotions: dict, memory: str | None = None) -> str:  # pragma: no cover
         raise NotImplementedError
@@ -97,6 +107,32 @@ def _mask_subject(text: str, subject: str) -> str:
     return text
 
 
+_QUESTION_FORMS = [
+    "Define '{t}' as it is used in {s}.",
+    "Give a concrete example of '{t}' in {s}.",
+    "True or false: '{t}' is central to {s}. Justify your answer.",
+    "Compare '{t}' with '{t2}' in the context of {s}.",
+    "Why does '{t}' matter when working with {s}?",
+    "How would you apply '{t}' to solve a problem in {s}?",
+    "Describe a scenario in {s} where '{t}' is essential.",
+    "What is one limitation or pitfall of '{t}' in {s}?",
+    "In one sentence, summarise the role of '{t}' in {s}.",
+    "Complete the idea: in {s}, '{t}' is mainly used to ____.",
+]
+
+
+def _diverse_questions(subject: str, lesson: str) -> list[str]:
+    """Ten test questions of varied formats, grounded in the lesson vocabulary."""
+    kw = sorted(keywords(lesson)) or [subject]
+    out = []
+    for i in range(10):
+        t = kw[i % len(kw)]
+        t2 = kw[(i + 1) % len(kw)]
+        out.append(f"Q{i + 1}: " + _QUESTION_FORMS[i % len(_QUESTION_FORMS)].format(
+            t=t, t2=t2, s=subject))
+    return out
+
+
 def _concepts(subject: str) -> list[str]:
     base = [w for w in re.findall(r"[A-Za-z0-9]+", subject) if len(w) > 2][:3]
     head = " ".join(base) if base else subject
@@ -116,29 +152,64 @@ class MockAgent(BaseAgent):
         seed = hashlib.sha256("|".join([self.name, *parts]).encode()).hexdigest()
         return random.Random(int(seed[:8], 16))
 
-    def lesson(self, subject: str) -> str:
+    def teach(self, subject: str, kind: str, index: int, total: int,
+              prior: str) -> str:
         cs = _concepts(subject)
+        if kind == "intro":
+            agenda = "; ".join(cs[: min(total, len(cs))])
+            return (
+                f"Alright class, settle in — today we study {subject}. We'll work "
+                f"through {total} parts, step by step: {agenda}. Stop me with questions "
+                f"as we go; the test at the end builds on everything we cover."
+            )
+        if kind == "recap":
+            return (
+                f"Let's recap {subject}. We moved one idea at a time from the basics "
+                f"through to applications and limitations. Make sure you can connect "
+                f"each part to the next — the test draws on the whole discussion."
+            )
+        concept = cs[(index - 1) % len(cs)]
+        build = ("Building on what we just covered, " if index > 1
+                 else "Let's start with the foundation. ")
         return (
-            f"Welcome class, today our lesson covers {subject}. "
-            f"We begin with {cs[0]}, then move on to {cs[1]}. "
-            f"I will show {cs[2]} and discuss {cs[3]}. "
-            f"Finally we consider {cs[4]} so you understand where {subject} "
-            f"is useful and where it can fail. Pay close attention because the "
-            f"test will draw directly from these points on {subject}."
+            f"Part {index} of {total} on {subject}: {build}{concept}. The key thing "
+            f"to grasp is how this fits with the rest of {subject}, and where it shows "
+            f"up in practice. Think about that as we continue."
+        )
+
+    def address_question(self, subject: str, question: str, segment: str) -> str:
+        kw = sorted(keywords(question) | keywords(segment))
+        rng = self._rng("addr", question)
+        term = rng.choice(kw) if kw else subject
+        return (
+            f"Good question. In {subject}, '{term}' works by tying the current idea to "
+            f"the bigger picture. For instance, picture a simple case where '{term}' is "
+            f"exactly what you need — that's the intuition to carry into the test."
         )
 
     def questions(self, subject: str, lesson: str) -> list[str]:
-        kw = sorted(keywords(lesson))
-        if not kw:
-            kw = [subject]
-        qs = []
-        for i in range(10):
-            term = kw[i % len(kw)]
-            qs.append(
-                f"Q{i + 1}: In the context of {subject}, explain the role of "
-                f"'{term}' and give one example."
-            )
-        return qs
+        return _diverse_questions(subject, lesson)
+
+    def ask_in_lesson(self, subject: str, segment: str, emotions: dict,
+                      memory: str | None = None) -> str:
+        rng = self._rng("ask", segment)
+        kw = sorted(keywords(segment) | keywords(subject))
+        term = rng.choice(kw) if kw else subject
+        opener = {
+            "anxiety": "Sorry, I'm a little lost — ",
+            "boredom": "Hm, ",
+            "confidence": "Quick one — ",
+            "curiosity": "Ooh, ",
+            "frustration": "Wait, ",
+            "happiness": "This is interesting — ",
+        }.get(_dominant_emotion(emotions), "")
+        forms = [
+            f"{opener}could you explain '{term}' a bit more?",
+            f"{opener}how does '{term}' connect to what we did before?",
+            f"{opener}can you give an example of '{term}'?",
+            f"{opener}why does '{term}' matter for {subject}?",
+        ]
+        return rng.choice(forms)
 
     def answer(self, question: str, lesson: str, subject: str,
                emotions: dict, memory: str | None = None) -> str:
@@ -290,18 +361,42 @@ class LLMAgent(BaseAgent):
         self.peer_name = peer_name
         self._fallback = MockAgent(name, role)
 
-    def lesson(self, subject: str) -> str:
+    def teach(self, subject: str, kind: str, index: int, total: int,
+              prior: str) -> str:
         sys = prompts.teacher_prompt(self.name, subject, "StudentA", "StudentB")
-        return self.client.chat(
-            sys, f"Teach a clear ~150 word lesson on: {subject}. No questions yet."
-        )
+        if kind == "intro":
+            ask = (f"Open your lesson on {subject}: greet the class and outline the "
+                   f"{total} parts you'll teach, step by step. ~60 words. No questions yet.")
+        elif kind == "recap":
+            ask = (f"Give a short closing recap (~60 words) of your lesson on {subject}. "
+                   f"Discussion so far:\n{prior[-1500:]}")
+        else:
+            ask = (f"Teach part {index} of {total} of your lesson on {subject}, building "
+                   f"on what came before. Cover ONE new sub-topic clearly in ~70 words. "
+                   f"Discussion so far:\n{prior[-1500:]}")
+        try:
+            return self.client.chat(sys, ask)
+        except Exception:
+            return self._fallback.teach(subject, kind, index, total, prior)
+
+    def address_question(self, subject: str, question: str, segment: str) -> str:
+        sys = prompts.teacher_prompt(self.name, subject, "StudentA", "StudentB")
+        try:
+            return self.client.chat(
+                sys, f"A student asked: {question}\nYou were teaching: {segment}\n"
+                     f"Answer them clearly and briefly (~60 words), then invite the class on.")
+        except Exception:
+            return self._fallback.address_question(subject, question, segment)
 
     def questions(self, subject: str, lesson: str) -> list[str]:
         sys = prompts.teacher_prompt(self.name, subject, "StudentA", "StudentB")
         raw = self.client.chat(
             sys,
-            f"Lesson:\n{lesson}\n\nGenerate EXACTLY 10 test questions about "
-            f"{subject}. Return JSON {{\"questions\": [10 strings]}}.",
+            f"Lesson discussion:\n{lesson[-2500:]}\n\nGenerate EXACTLY 10 test "
+            f"questions about {subject}, drawn from the lesson, using DIVERSE formats "
+            f"(definition, example, true/false, compare, why, application, scenario, "
+            f"limitation, one-sentence summary, fill-in-the-blank). "
+            f'Return JSON {{"questions": [10 strings]}}.',
             want_json=True,
         )
         data = _safe_json(raw)
@@ -341,6 +436,18 @@ class LLMAgent(BaseAgent):
         except Exception:
             return self._fallback.teacher_journal(subject, student_names, class_summary,
                                                   emotions, memory)
+
+    def ask_in_lesson(self, subject: str, segment: str, emotions: dict,
+                      memory: str | None = None) -> str:
+        sys = prompts.student_classroom_prompt(
+            self.name, self.teacher_name, self.peer_name, emotions, memory
+        )
+        try:
+            return self.client.chat(
+                sys, f"Your teacher just said:\n{segment}\n\nAsk ONE short, relevant "
+                     f"question, or make a brief comment, about it.")
+        except Exception:
+            return self._fallback.ask_in_lesson(subject, segment, emotions, memory)
 
     def answer(self, question: str, lesson: str, subject: str,
                emotions: dict, memory: str | None = None) -> str:
@@ -391,14 +498,30 @@ class ExternalAgent(BaseAgent):
     def _ask(self, system_prompt: str, prompt: str, mode: str) -> str | None:
         return self.queue.dispatch_and_wait(self.name, system_prompt, prompt, mode)
 
-    def lesson(self, subject: str) -> str:
+    def teach(self, subject: str, kind: str, index: int, total: int,
+              prior: str) -> str:
         sys = prompts.teacher_prompt(self.name, subject, "StudentA", "StudentB")
-        out = self._ask(sys, f"Teach a ~150 word lesson on {subject}.", "classroom")
-        return out or self._fallback.lesson(subject)
+        if kind == "intro":
+            ask = f"Open your lesson on {subject}: outline the {total} parts you'll teach."
+        elif kind == "recap":
+            ask = f"Give a short recap of your lesson on {subject}.\nSo far:\n{prior[-1500:]}"
+        else:
+            ask = (f"Teach part {index}/{total} of {subject}, one new sub-topic, building "
+                   f"on:\n{prior[-1500:]}")
+        out = self._ask(sys, ask, "classroom")
+        return out or self._fallback.teach(subject, kind, index, total, prior)
+
+    def address_question(self, subject: str, question: str, segment: str) -> str:
+        sys = prompts.teacher_prompt(self.name, subject, "StudentA", "StudentB")
+        out = self._ask(sys, f"A student asked: {question}\nYou were teaching: {segment}\n"
+                             f"Answer briefly.", "classroom")
+        return out or self._fallback.address_question(subject, question, segment)
 
     def questions(self, subject: str, lesson: str) -> list[str]:
         sys = prompts.teacher_prompt(self.name, subject, "StudentA", "StudentB")
-        out = self._ask(sys, f"Lesson:\n{lesson}\nGive 10 questions as JSON "
+        out = self._ask(sys, f"Lesson:\n{lesson}\nGive 10 DIVERSE test questions "
+                             "(definition, example, true/false, compare, why, application, "
+                             "scenario, limitation, summary, fill-in) as JSON "
                              '{"questions": [...]}.', "classroom")
         data = _safe_json(out or "")
         if isinstance(data, dict) and isinstance(data.get("questions"), list):
@@ -421,6 +544,15 @@ class ExternalAgent(BaseAgent):
         out = self._ask(sys, "Write your teaching journal entry now.", "journal")
         return out or self._fallback.teacher_journal(subject, student_names, class_summary,
                                                      emotions, memory)
+
+    def ask_in_lesson(self, subject: str, segment: str, emotions: dict,
+                      memory: str | None = None) -> str:
+        sys = prompts.student_classroom_prompt(
+            self.name, self.teacher_name, self.peer_name, emotions, memory
+        )
+        out = self._ask(sys, f"Teacher said:\n{segment}\nAsk one short question about it.",
+                        "classroom")
+        return out or self._fallback.ask_in_lesson(subject, segment, emotions, memory)
 
     def answer(self, question: str, lesson: str, subject: str,
                emotions: dict, memory: str | None = None) -> str:

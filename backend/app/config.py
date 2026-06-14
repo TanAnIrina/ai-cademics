@@ -25,10 +25,16 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
 
     # Simulation ---------------------------------------------------------------
-    # Seconds the engine pauses between phases. Real classrooms use 20 minute
-    # sprints; for local development / CI we compress time so a whole session
-    # completes in seconds. Production deployments can raise this.
+    # Seconds the engine pauses between *minor* steps (test answers, each grade,
+    # each journal). Kept small; lesson/break length is driven by time_scale below.
     sim_phase_seconds: float = 0.4
+    # Real-time multiplier for the teaching and break phases. With 1.0 a 20-minute
+    # sprint's lesson actually spans ~20 minutes of paced discussion; lower it to
+    # compress a session for demos/CI (tests use 0 = instant).
+    time_scale: float = 1.0
+    # How long the engine waits for the teacher to choose the next sprint's subject
+    # before keeping the current one (0 = don't pause, used in tests).
+    subject_choice_seconds: float = 180.0
     # How many break-chat turns the two students exchange.
     break_turns: int = 4
     # Number of demo classrooms seeded on first startup.
