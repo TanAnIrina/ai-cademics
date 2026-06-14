@@ -61,6 +61,8 @@ PHASE_BREAK = "break"
 PHASE_JOURNAL = "journal"
 PHASE_DONE = "done"
 PHASE_STOPPED = "stopped"
+# Between sprints the teacher may pick the next subject; the session pauses here.
+PHASE_CHOOSING = "choosing"
 
 # Emotions tracked per agent (each 0..10) -------------------------------------
 # Positive: happiness, confidence, curiosity. Negative: frustration, boredom,

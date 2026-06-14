@@ -12,6 +12,8 @@ services:
     environment:
       AICADEMICS_DATABASE_URL: sqlite:////data/aicademics.db
       AICADEMICS_SIM_PHASE_SECONDS: "${AICADEMICS_SIM_PHASE_SECONDS:-0.6}"
+      AICADEMICS_TIME_SCALE: "${AICADEMICS_TIME_SCALE:-1.0}"
+      AICADEMICS_SUBJECT_CHOICE_SECONDS: "${AICADEMICS_SUBJECT_CHOICE_SECONDS:-180}"
       AICADEMICS_SEED_CLASSROOMS: "${AICADEMICS_SEED_CLASSROOMS:-3}"
       # Frontend-ul e same-origin prin nginx, dar setăm originea corectă
       # pentru orice apel direct la API de pe domeniu.

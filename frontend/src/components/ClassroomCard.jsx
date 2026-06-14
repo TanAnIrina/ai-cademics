@@ -60,7 +60,9 @@ export default function ClassroomCard({ room }) {
           <ProgressBar value={room.progress} cyan={room.status === "running"} />
           <span className="faint mono" style={{ fontSize: 11.5 }}>
             {room.status === "running"
-              ? `sprint ${room.current_sprint}/${room.num_sprints} · ${room.phase}`
+              ? room.phase === "choosing"
+                ? "choosing next subject…"
+                : `sprint ${room.current_sprint}/${room.num_sprints} · ${room.phase}`
               : "session complete"}
           </span>
         </div>

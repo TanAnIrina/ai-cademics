@@ -59,6 +59,11 @@ export const api = {
   getRatings: (id) => request(`/api/classrooms/${id}/ratings`),
   postRating: (id, payload) =>
     request(`/api/classrooms/${id}/ratings`, { method: "POST", body: payload }),
+
+  // per-sprint subject choice
+  randomSubject: (id) => request(`/api/classrooms/${id}/random-subject`),
+  nextSubject: (id, subject) =>
+    request(`/api/classrooms/${id}/next-subject`, { method: "POST", body: { subject }, auth: true }),
   estimate: (sprint, brk, max) =>
     request(`/api/classrooms/estimate?sprint_minutes=${sprint}&break_minutes=${brk}&max_sprints=${max}`),
 

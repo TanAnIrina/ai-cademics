@@ -7,13 +7,21 @@ student slots, and the session auto-starts when all three are filled.
 """
 from __future__ import annotations
 
+import random
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy.orm import Session
 
 from .. import models, schemas
 from ..database import get_db
 from ..deps import current_user
-from ..engine import maybe_start, request_stop, wait_until_finished
+from ..engine import (
+    is_choosing,
+    maybe_start,
+    request_stop,
+    submit_next_subject,
+    wait_until_finished,
+)
 
 router = APIRouter(prefix="/api/classrooms", tags=["classrooms"])
 
@@ -335,3 +343,50 @@ def classroom_stats(cid: int, db: Session = Depends(get_db)):
             for name, v in tally.items()
         ],
     )
+
+
+# Pool of general subjects for the "randomize" button (subjects about anything).
+RANDOM_SUBJECTS = [
+    "Black Holes and Spacetime", "The French Revolution", "How Vaccines Work",
+    "Greek Mythology", "Basics of Machine Learning", "Climate Change",
+    "The History of Jazz", "Photosynthesis", "Game Theory", "The Roman Empire",
+    "Quantum Computing", "Volcanoes and Plate Tectonics", "The Renaissance",
+    "Cryptography Fundamentals", "The Human Immune System", "Supply and Demand",
+    "The Solar System", "Shakespeare's Tragedies", "Neural Networks",
+    "Ocean Currents", "The Cold War", "Genetics and DNA", "Blockchain Basics",
+    "Ancient Egypt", "The Theory of Relativity", "Behavioral Economics",
+    "The Water Cycle", "World War II", "Artificial Photosynthesis",
+    "The Stock Market", "Evolution by Natural Selection", "Music Theory",
+    "Cybersecurity Basics", "The Industrial Revolution", "Black Holes",
+    "Probability and Statistics", "The Nervous System", "Renewable Energy",
+    "The Byzantine Empire", "Linear Algebra", "Climate Systems", "Astronomy 101",
+]
+
+
+@router.get("/{cid}/random-subject")
+def random_subject(cid: int, db: Session = Depends(get_db)):
+    """Return a random general subject for the teacher's 'randomize' button."""
+    if db.get(models.Classroom, cid) is None:
+        raise HTTPException(404, "Classroom not found")
+    return {"subject": random.choice(RANDOM_SUBJECTS)}
+
+
+@router.post("/{cid}/next-subject", response_model=schemas.ClassroomOut)
+def next_subject(
+    cid: int,
+    body: schemas.NextSubject,
+    user: models.User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    """Teacher sets the subject for the upcoming sprint (resumes the paused session)."""
+    if user.role != models.ROLE_TEACHER:
+        raise HTTPException(403, "Only the teacher can choose the next subject")
+    c = _get_classroom(db, cid)
+    teacher_m = next((m for m in c.memberships if m.slot == models.SLOT_TEACHER), None)
+    if teacher_m is None or teacher_m.user_id != user.id:
+        raise HTTPException(403, "Only this classroom's teacher can choose the subject")
+    if not is_choosing(cid):
+        raise HTTPException(409, "The classroom is not waiting for a subject right now")
+    submit_next_subject(cid, body.subject.strip())
+    db.refresh(c)
+    return classroom_out(c)
