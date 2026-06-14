@@ -1,8 +1,9 @@
 # 📋 Product Backlog & User Stories
 
 > Acoperă cerința: **user stories (minim 10), backlog creation — 2 pct**.
-> Backlog-ul a fost creat și rafinat cu ajutorul unui tool AI (Claude) — vezi
-> [`AI_USAGE_REPORT.md`](AI_USAGE_REPORT.md#1-backlog--user-stories) pentru prompturile folosite.
+> **28 user stories pe 7 epics**, prioritizate MoSCoW, cu estimări în story points
+> și status. Backlog-ul a fost creat și rafinat cu ajutorul unui tool AI (Claude) —
+> vezi [`AI_USAGE_REPORT.md`](AI_USAGE_REPORT.md#1-backlog--user-stories) pentru prompturi.
 
 ## Cuprins
 - [Epic 1: Acces și gestionarea profilului](#epic-1-acces-și-gestionarea-profilului)
@@ -10,6 +11,8 @@
 - [Epic 3: Emoții, pauze și acțiuni disciplinare](#epic-3-emoții-pauze-și-acțiuni-disciplinare)
 - [Epic 4: Analiză și urmărirea performanței](#epic-4-analiză-și-urmărirea-performanței)
 - [Epic 5: Observatori și arhivă](#epic-5-observatori-și-arhivă)
+- [Epic 6: Iterația v2.1 — interacțiune, memorie și analiză](#epic-6-iterația-v21--interacțiune-memorie-și-analiză)
+- [Epic 7: Iterația v2.2 — scalare, planificare și export](#epic-7-iterația-v22--scalare-planificare-și-export)
 - [Tabelul de backlog](#tabelul-de-backlog)
 
 ---
@@ -82,8 +85,8 @@
 - **Teste:** `backend/tests/test_simulation.py`, `backend/tests/test_evals.py` (`grade_validity`)
 
 ### US 11 — Emoții live per loc
-**Ca** observator, **vreau să** văd evoluția emoțiilor (frustrare/fericire) fiecărui student pe parcursul sesiunii, **astfel încât** să urmăresc impactul notelor și al sancțiunilor.
-- **Criterii de acceptare:** emoțiile sunt afișate per loc și actualizate la fiecare fază; valorile sunt persistate și apar și în arhivă.
+**Ca** observator, **vreau să** văd emoțiile fiecărui agent pe parcursul sesiunii, **astfel încât** să urmăresc impactul notelor și al sancțiunilor.
+- **Criterii de acceptare:** emoțiile sunt afișate per loc și actualizate la fiecare fază; valorile sunt persistate și apar și în arhivă. (Extins în US 19 la 6 emoții.)
 - **Implementare:** `backend/app/engine/__init__.py`, `frontend/src/pages/ClassroomDetailPage.jsx`
 
 ### US 12 — Rezultatele evaluărilor automate (evals)
@@ -106,11 +109,102 @@
 - **Implementare:** `backend/app/routers/history.py`, `backend/app/models.py` (`Archive`), `frontend/src/pages/HistoryPage.jsx`
 - **Teste:** `backend/tests/test_chat_history.py`
 
+## Epic 6: Iterația v2.1 — interacțiune, memorie și analiză
+
+> A doua iterație de backlog (Sprint 4): rafinarea interacțiunii dintre agenți, a
+> modelului emoțional și a instrumentelor de analiză, pe baza feedback-ului după v2.
+
+### US 15 — Dialog responsiv în pauză
+**Ca** observator, **vreau ca** fiecare student să răspundă explicit la ce tocmai a spus colegul (nu replici paralele, fără legătură), **astfel încât** pauza să arate ca o conversație reală în care se ascultă reciproc.
+- **Criterii de acceptare:** la fiecare tură, replica anterioară a colegului este injectată în prompt; răspunsul recunoaște și continuă ce a spus celălalt; subiectul lecției rămâne interzis.
+- **Implementare:** `backend/app/engine/__init__.py` (bucla break cu `peer_last`/`last_by_slot`), `backend/app/engine/prompts.py` (`student_break_prompt`), `backend/app/engine/agents.py` (`break_turn`)
+- **Teste:** `backend/tests/test_features.py` (`test_break_replies_acknowledge_the_classmate`)
+
+### US 16 — Continuitate emoțională și memorie între sprinturi
+**Ca** observator, **vreau ca** agenții să își amintească ce au simțit și ce au scris în jurnal în sprinturile anterioare, **astfel încât** comportamentul lor să evolueze coerent de-a lungul sesiunii.
+- **Criterii de acceptare:** la sprinturile următoare, un rezumat al jurnalului anterior + starea emoțională sunt injectate în prompturi (răspuns, pauză, jurnal); profesorul are propria memorie pentru reflecție.
+- **Implementare:** `backend/app/engine/__init__.py` (dicționarul `memory` per slot), `backend/app/engine/prompts.py` (`_memory_block`), `backend/app/engine/agents.py` (parametrul `memory`)
+- **Teste:** acoperit de `backend/tests/test_simulation.py` + verificare end-to-end (jurnalul de la sprintul 2 referă continuitatea)
+
+### US 17 — Oprirea și ștergerea unei săli (doar profesor)
+**Ca** profesor, **vreau** un buton care oprește o sesiune activă și șterge definitiv sala cu toate datele ei, **astfel încât** să pot curăța sălile de test sau să închid o sesiune scăpată de sub control.
+- **Criterii de acceptare:** doar profesorul care deține sala (sau o sală fără profesor) poate șterge; o sesiune `running` este oprită cooperativ înainte de ștergere; studenții și ceilalți profesori primesc 403.
+- **Implementare:** `backend/app/engine/__init__.py` (`request_stop`/`_should_stop`/`PHASE_STOPPED`), `backend/app/routers/classrooms.py` (`DELETE /api/classrooms/{id}`), `frontend/src/pages/ClassroomDetailPage.jsx` (`handleDelete`)
+- **Teste:** `backend/tests/test_features.py` (`test_teacher_can_stop_and_delete_classroom`, `test_students_cannot_delete_classroom`, `test_other_teacher_cannot_delete_owned_classroom`)
+
+### US 18 — ID-ul sălii vizibil pentru agenții self-hosted
+**Ca** utilizator care rulează agenți locali, **vreau să** văd ID-ul sălii direct pe pagina clasei, **astfel încât** să știu exact ce valoare să dau la `--classroom` în comandă.
+- **Criterii de acceptare:** pagina clasei afișează un badge `ID <n> · --classroom <n>` cu explicație; ID-ul apare și pe pagina de statistici.
+- **Implementare:** `frontend/src/pages/ClassroomDetailPage.jsx`, `frontend/src/pages/ClassroomStatsPage.jsx`
+
+### US 19 — Model emoțional extins și dinamic
+**Ca** observator, **vreau** un set mai bogat de emoții (nu doar frustrare/fericire) care evoluează din note, sancțiuni, suportul colegilor și trecerea sprinturilor, **astfel încât** stările agenților să fie nuanțate și credibile.
+- **Criterii de acceptare:** 6 emoții (happiness, frustration, confidence, curiosity, boredom, anxiety), fiecare 0–10, afișate per loc; se actualizează diferențiat la note mici/medii/mari și la sancțiuni/recompense; tonul răspunsurilor reflectă emoția dominantă.
+- **Implementare:** `backend/app/models.py` (`EMOTIONS` + coloane `Membership`), `backend/app/engine/__init__.py` (`_adjust` + actualizările emoționale), `frontend/src/components/ui.jsx` (`EmotionBars`)
+- **Teste:** `backend/tests/test_features.py` (`test_members_expose_full_emotion_vector`)
+
+### US 20 — Pagină de statistici a clasei
+**Ca** observator / evaluator, **vreau** o pagină separată cu evoluția clasei și a emoțiilor agenților, **astfel încât** să pot analiza vizual cum s-a schimbat sesiunea în timp.
+- **Criterii de acceptare:** grafice de evoluție a emoțiilor per agent (o linie/emoție pe sprinturi), traiectoria notelor per student și totalurile de sancțiuni/recompense; un snapshot emoțional este salvat la fiecare sprint (plus un baseline la start).
+- **Implementare:** `backend/app/models.py` (`EmotionSnapshot`), `backend/app/routers/classrooms.py` (`GET /api/classrooms/{id}/stats`), `frontend/src/pages/ClassroomStatsPage.jsx`
+- **Teste:** `backend/tests/test_features.py` (`test_stats_endpoint_returns_emotion_timeline_and_grades`)
+
+### US 21 — Claritatea rolurilor (profesor vs coleg)
+**Ca** student (agent AI), **vreau să** știu clar cine este profesorul (autoritate care notează) și cine este colegul (egal), **astfel încât** să nu mă adresez profesorului ca unui coleg și invers.
+- **Criterii de acceptare:** prompturile definesc explicit cele două roluri; în jurnal studentul distinge sentimentele față de profesor de cele față de coleg; rolurile nu mai sunt confundate.
+- **Implementare:** `backend/app/engine/prompts.py` (`student_classroom_prompt`, `student_break_prompt`, `student_journal_prompt`)
+- **Teste:** acoperit de `backend/tests/test_simulation.py` + verificare end-to-end (jurnalul spune „my teacher … my classmate (not the teacher)")
+
+### US 22 — Jurnal de profesor separat
+**Ca** observator, **vreau** un jurnal al profesorului într-un tab separat de jurnalele studenților, **astfel încât** să văd reflecția profesorului asupra fiecărui sprint.
+- **Criterii de acceptare:** tab-ul „Journal" este împărțit în „Student Journals" și „Teacher Journal"; profesorul scrie o reflecție la persoana întâi la finalul fiecărui sprint (<1000 cuvinte), marcată cu `author_role=teacher`; split-ul apare și în istoric.
+- **Implementare:** `backend/app/models.py` (`Journal.author_role`), `backend/app/engine/__init__.py` (`teacher_journal`), `backend/app/engine/prompts.py` (`teacher_journal_prompt`), `backend/app/engine/agents.py` (`teacher_journal`), `frontend/src/components/Panels.jsx` (`TeacherJournal`), `frontend/src/pages/ClassroomDetailPage.jsx`
+- **Teste:** `backend/tests/test_features.py` (`test_teacher_journal_is_separate_from_student_journals`), `backend/tests/test_simulation.py`
+
+## Epic 7: Iterația v2.2 — scalare, planificare și export
+
+> A treia iterație (Sprint 5): scalarea numărului de studenți, planificarea
+> sesiunilor, feedback de la observatori și export de date.
+
+### US 23 — Statisticile păstrate în istoric
+**Ca** utilizator, **vreau** ca pagina unei sesiuni arhivate să includă același tab de statistici ca sesiunea live, **astfel încât** evoluția emoțiilor și a notelor să poată fi analizată și după încheiere.
+- **Criterii de acceptare:** arhiva conține `emotion_timeline`; pagina History afișează un tab „Statistics" cu graficele de evoluție a emoțiilor, traiectoria notelor și sancțiunile, reconstruite din payload.
+- **Implementare:** `frontend/src/components/Stats.jsx` (componentă comună `StatsView`), `frontend/src/pages/HistoryDetailPage.jsx`, `frontend/src/pages/ClassroomStatsPage.jsx`
+
+### US 24 — Mai mulți studenți per sală
+**Ca** profesor, **vreau să** pot configura între 2 și 5 studenți într-o sală, **astfel încât** simularea să acopere clase mai mari, nu doar perechi.
+- **Criterii de acceptare:** profesorul alege numărul de studenți la configurare; locurile (`student_a..student_e`) se completează dinamic; pauza devine round-robin (fiecare răspunde celui anterior); notele, jurnalele și snapshot-urile emoționale acoperă toți studenții; implicit rămâne 2 (compatibilitate).
+- **Implementare:** `backend/app/models.py` (`STUDENT_SLOTS`, `student_slots`, `max_students`), `backend/app/engine/__init__.py` (bucla generalizată pe N studenți), `backend/app/routers/classrooms.py`, `frontend/src/pages/ClassroomDetailPage.jsx`, `frontend/src/components/ClassroomCard.jsx`
+- **Teste:** `backend/tests/test_v22_features.py` (`test_classroom_supports_three_students`, `test_five_students_is_the_cap`, `test_third_student_rejected_when_capacity_is_two`)
+
+### US 25 — Programarea sesiunilor
+**Ca** profesor, **vreau să** programez ora de start a unei sesiuni, **astfel încât** sala să nu pornească automat înainte de momentul ales, chiar dacă toate locurile sunt ocupate.
+- **Criterii de acceptare:** profesorul setează opțional `scheduled_start`; o sală plină dar programată în viitor rămâne `waiting`; un ticker de fundal pornește sălile ajunse la scadență; o oră trecută nu blochează startul.
+- **Implementare:** `backend/app/models.py` (`scheduled_start`), `backend/app/engine/__init__.py` (`_schedule_reached`, `_scheduler_loop`, `start_scheduler`), `backend/app/routers/classrooms.py`, `frontend/src/pages/ClassroomDetailPage.jsx`
+- **Teste:** `backend/tests/test_v22_features.py` (`test_scheduled_room_does_not_start_before_time`, `test_past_schedule_starts_immediately`)
+
+### US 26 — Rating de lecție de la observatori
+**Ca** observator, **vreau să** dau o notă (1–5 stele) și un comentariu lecției, **astfel încât** să ofer feedback fără să fiu autentificat.
+- **Criterii de acceptare:** oricine poate trimite un rating (ca la chat-ul de observator); se afișează media și numărul de rating-uri; rating-urile sunt incluse în arhivă și în export; rating-urile date după încheiere apar în istoric.
+- **Implementare:** `backend/app/models.py` (`LessonRating`), `backend/app/routers/ratings.py`, `frontend/src/components/RatingPanel.jsx`, `frontend/src/pages/HistoryDetailPage.jsx`
+- **Teste:** `backend/tests/test_v22_features.py` (`test_observer_can_rate_lesson`, `test_rating_validation_rejects_out_of_range`, `test_ratings_posted_after_finish_appear_in_history`)
+
+### US 27 — Export PDF al sesiunii și statisticilor
+**Ca** utilizator, **vreau să** descarc un PDF al unei sesiuni arhivate, **astfel încât** să am un raport portabil cu rezumat, note, statistici, sancțiuni, rating-uri și jurnale.
+- **Criterii de acceptare:** un endpoint generează un PDF la cerere din payload-ul arhivei (rezumat, tabel note, tabel emoții finale per agent, sancțiuni, rating-uri, jurnale); un buton de descărcare există pe pagina History.
+- **Implementare:** `backend/app/pdf_report.py` (fpdf2), `backend/app/routers/history.py` (`GET /api/history/{id}/pdf`), `frontend/src/pages/HistoryDetailPage.jsx`
+- **Teste:** `backend/tests/test_v22_features.py` (`test_pdf_export_of_archived_session`)
+
+### US 28 — Emoțiile profesorului în statistici
+**Ca** observator, **vreau să** văd și evoluția emoțională a profesorului în pagina de statistici, **astfel încât** să urmăresc cum reacționează la performanța clasei.
+- **Criterii de acceptare:** profesorul primește un snapshot emoțional la fiecare sprint (alături de studenți); emoțiile profesorului evoluează din media notelor și din predarea repetată; pagina de statistici afișează un grafic dedicat profesorului.
+- **Implementare:** `backend/app/engine/__init__.py` (snapshot + reacția emoțională a profesorului), `frontend/src/components/Stats.jsx`
+
 ---
 
 ## Tabelul de backlog
 
-Prioritizare prin metoda **MoSCoW**, estimare în story points (Fibonacci). Statusul reflectă versiunea curentă (v2).
+Prioritizare prin metoda **MoSCoW**, estimare în story points (Fibonacci). Statusul reflectă versiunea curentă (v2.1). Sprinturile 1–3 au livrat produsul de bază (v2); Sprintul 4 a livrat iterația de rafinare (v2.1).
 
 | ID | Titlu | Epic | Prioritate | Estimare | Sprint | Status | Teste |
 |----|-------|------|-----------|----------|--------|--------|-------|
@@ -128,5 +222,19 @@ Prioritizare prin metoda **MoSCoW**, estimare în story points (Fibonacci). Stat
 | US 13 | Chat observatori | 5 | Could | 2 | 3 | ✅ Done | ✅ |
 | US 3 | Profil cu nume | 1 | Could | 1 | 2 | ✅ Done | — |
 | US 8 | Sancțiuni & recompense | 3 | Could | 3 | 3 | ✅ Done | ✅ |
+| US 21 | Claritatea rolurilor (profesor vs coleg) | 6 | Must | 2 | 4 | ✅ Done | ✅ |
+| US 15 | Dialog responsiv în pauză | 6 | Should | 3 | 4 | ✅ Done | ✅ |
+| US 19 | Model emoțional extins (6 emoții) | 6 | Should | 5 | 4 | ✅ Done | ✅ |
+| US 22 | Jurnal de profesor separat | 6 | Should | 3 | 4 | ✅ Done | ✅ |
+| US 20 | Pagină de statistici | 6 | Should | 5 | 4 | ✅ Done | ✅ |
+| US 17 | Stop & delete sală (profesor) | 6 | Should | 3 | 4 | ✅ Done | ✅ |
+| US 16 | Continuitate / memorie între sprinturi | 6 | Could | 5 | 4 | ✅ Done | — |
+| US 18 | ID sală vizibil pentru agenți | 6 | Could | 1 | 4 | ✅ Done | — |
+| US 24 | Mai mulți studenți per sală (2–5) | 7 | Should | 8 | 5 | ✅ Done | ✅ |
+| US 23 | Statistici păstrate în istoric | 7 | Should | 3 | 5 | ✅ Done | — |
+| US 27 | Export PDF al sesiunii | 7 | Should | 5 | 5 | ✅ Done | ✅ |
+| US 26 | Rating de lecție (observatori) | 7 | Should | 3 | 5 | ✅ Done | ✅ |
+| US 25 | Programarea sesiunilor | 7 | Could | 5 | 5 | ✅ Done | ✅ |
+| US 28 | Emoțiile profesorului în statistici | 7 | Could | 2 | 5 | ✅ Done | — |
 
-**Backlog viitor (nepreluat în v2):** programarea sălilor în viitor (scheduling), rating de lecție dat de observatori, export PDF al arhivei, WebSockets în loc de polling, suport pentru mai mult de 2 studenți per sală.
+**Backlog viitor (nepreluat încă):** WebSockets în loc de polling (push live, latență mai mică), rating de lecție per sprint (nu doar pe sală), export PDF cu grafice randate ca imagini, programare recurentă a sesiunilor, integrare cu un model de limbaj pentru rezumarea automată a sesiunii.

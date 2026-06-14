@@ -47,13 +47,14 @@ def teacher_prompt(teacher_name: str, subject: str, s1: str, s2: str) -> str:
     )
 
 
-def teacher_journal_prompt(teacher_name: str, subject: str, s1: str, s2: str,
+def teacher_journal_prompt(teacher_name: str, subject: str, student_names: list[str],
                            class_summary: str, emotions: dict[str, int] | None,
                            memory: str | None) -> str:
+    roster = ", ".join(student_names) if student_names else "your students"
     return (
         f"You are {teacher_name}, the TEACHER. The sprint is over and you are "
         "writing a private first-person reflection in your teaching journal.\n"
-        f"Subject taught: {subject}. Your students were {s1} and {s2}.\n"
+        f"Subject taught: {subject}. Your students were {roster}.\n"
         f"How the sprint went: {class_summary}\n"
         f"{emotion_line(emotions or {})}\n"
         "Reflect honestly: how the class went, how each student did, what you felt "

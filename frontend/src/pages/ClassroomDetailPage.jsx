@@ -7,8 +7,24 @@ import { Loading, Empty, StatusBadge, ProgressBar, EmotionBars } from "../compon
 import { Transcript, Grades, Journals, TeacherJournal, Evals } from "../components/Panels.jsx";
 import SessionTimeChart from "../components/SessionTimeChart.jsx";
 import Chat from "../components/Chat.jsx";
+import RatingPanel from "../components/RatingPanel.jsx";
 
 const SLOT_LABEL = { teacher: "Teacher", student_a: "Student A", student_b: "Student B" };
+
+function slotLabel(slot) {
+  if (SLOT_LABEL[slot]) return SLOT_LABEL[slot];
+  const m = /^student_([a-e])$/.exec(slot);
+  return m ? `Student ${m[1].toUpperCase()}` : slot;
+}
+
+// ISO string -> value for <input type="datetime-local"> in the user's local time.
+function toLocalInput(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
 
 function Members({ members }) {
   if (!members.length) return <p className="faint">No one has joined yet.</p>;
@@ -21,7 +37,7 @@ function Members({ members }) {
             <div>
               <div style={{ fontWeight: 600, fontSize: 14.5 }}>{m.display_name}</div>
               <div className="faint mono" style={{ fontSize: 11 }}>
-                {SLOT_LABEL[m.slot]}
+                {slotLabel(m.slot)}
               </div>
             </div>
           </div>
@@ -38,6 +54,10 @@ function TeacherConfig({ initial, onSubmit, submitLabel, busy }) {
   const [sprintMinutes, setSprintMinutes] = useState(initial?.sprint_minutes ?? 20);
   const [breakMinutes, setBreakMinutes] = useState(initial?.break_minutes ?? 10);
   const [numSprints, setNumSprints] = useState(initial?.num_sprints ?? 2);
+  const [numStudents, setNumStudents] = useState(initial?.max_students ?? 2);
+  const [scheduledStart, setScheduledStart] = useState(
+    initial?.scheduled_start ? toLocalInput(initial.scheduled_start) : ""
+  );
   const [estimate, setEstimate] = useState(null);
   const [err, setErr] = useState(null);
 
@@ -70,6 +90,8 @@ function TeacherConfig({ initial, onSubmit, submitLabel, busy }) {
       sprint_minutes: Math.min(180, Math.max(1, Number(sprintMinutes) || 1)),
       break_minutes: Math.min(120, Math.max(0, Number(breakMinutes) || 0)),
       num_sprints: Math.min(12, Math.max(1, Number(numSprints) || 1)),
+      num_students: Math.min(5, Math.max(2, Number(numStudents) || 2)),
+      scheduled_start: scheduledStart ? new Date(scheduledStart).toISOString() : null,
     });
   }
 
@@ -120,6 +142,31 @@ function TeacherConfig({ initial, onSubmit, submitLabel, busy }) {
             onChange={(e) => setNumSprints(e.target.value)}
           />
         </div>
+        <div className="field grow">
+          <label className="label">Students</label>
+          <input
+            className="input mono"
+            type="number"
+            min={2}
+            max={5}
+            value={numStudents}
+            onChange={(e) => setNumStudents(e.target.value)}
+          />
+        </div>
+      </div>
+
+      <div className="field">
+        <label className="label">Start time (optional)</label>
+        <input
+          className="input mono"
+          type="datetime-local"
+          value={scheduledStart}
+          onChange={(e) => setScheduledStart(e.target.value)}
+        />
+        <p className="faint" style={{ fontSize: 12, margin: "4px 0 0" }}>
+          Leave empty to start as soon as all seats fill. If set, the session waits
+          until this time even when full.
+        </p>
       </div>
 
       <div className="panel card-pad">
@@ -183,7 +230,7 @@ function JoinControls({ live, refresh }) {
   if (room.status !== "waiting") {
     return mine ? (
       <p className="muted">
-        You're seated as <strong>{SLOT_LABEL[mine.slot]}</strong>. The session is underway.
+        You're seated as <strong>{slotLabel(mine.slot)}</strong>. The session is underway.
       </p>
     ) : (
       <p className="muted">This session has already started. You can watch and chat below.</p>
@@ -195,7 +242,7 @@ function JoinControls({ live, refresh }) {
     return (
       <div className="stack" style={{ gap: 14 }}>
         <div className="panel card-pad">
-          You've claimed <strong>{SLOT_LABEL[mine.slot]}</strong>. The session starts automatically
+          You've claimed <strong>{slotLabel(mine.slot)}</strong>. The session starts automatically
           once all three seats are filled.
         </div>
         {mine.slot === "teacher" && (
@@ -224,7 +271,7 @@ function JoinControls({ live, refresh }) {
 
   // not yet a member
   const teacherTaken = room.members.some((m) => m.slot === "teacher");
-  const studentsTaken = room.members.filter((m) => m.role === "student").length >= 2;
+  const studentsTaken = room.members.filter((m) => m.role === "student").length >= room.max_students;
 
   if (user.role === "teacher") {
     if (teacherTaken)
@@ -243,7 +290,7 @@ function JoinControls({ live, refresh }) {
   }
 
   // student
-  if (studentsTaken) return <p className="muted">Both student seats are taken.</p>;
+  if (studentsTaken) return <p className="muted">All student seats are taken.</p>;
   return (
     <div className="stack" style={{ gap: 12 }}>
       <p className="muted" style={{ margin: 0 }}>
@@ -349,8 +396,13 @@ export default function ClassroomDetailPage() {
                 {room.subject || "no subject yet"}
               </span>
               <span className="tag">
-                {room.sprint_minutes}m sprint · {room.break_minutes}m break · {room.num_sprints} sprints
+                {room.sprint_minutes}m sprint · {room.break_minutes}m break · {room.num_sprints} sprints · {room.max_students} students
               </span>
+              {room.scheduled_start && room.status === "waiting" && (
+                <span className="tag" style={{ color: "var(--violet)" }}>
+                  🕑 starts {new Date(room.scheduled_start).toLocaleString()}
+                </span>
+              )}
               <Link to={`/classroom/${room.id}/stats`} className="tag" style={{ textDecoration: "none" }}>
                 📊 Statistics
               </Link>
@@ -412,6 +464,10 @@ export default function ClassroomDetailPage() {
 
             <div className="card card-pad" style={{ minHeight: 360 }}>
               <Chat classroomId={cid} />
+            </div>
+
+            <div className="card card-pad">
+              <RatingPanel classroomId={cid} />
             </div>
 
             {isOwnerTeacher && (

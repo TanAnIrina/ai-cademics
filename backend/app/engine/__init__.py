@@ -149,16 +149,23 @@ def run_session(classroom_id: int) -> None:
 
         memberships = {m.slot: m for m in classroom.memberships}
         teacher_m = memberships.get(models.SLOT_TEACHER)
-        sa = memberships.get(models.SLOT_STUDENT_A)
-        sb = memberships.get(models.SLOT_STUDENT_B)
-        if not (teacher_m and sa and sb):
+        active_slots = models.student_slots(classroom.max_students)
+        student_ms = [memberships[s] for s in active_slots if s in memberships]
+        if not (teacher_m and student_ms and len(student_ms) == len(active_slots)):
             return
 
         bound_queue = BoundQueue(external_queue, classroom_id)
         teacher = _agent_for(teacher_m, bound_queue, teacher_m.agent_name, "")
-        student_a = _agent_for(sa, bound_queue, teacher_m.agent_name, sb.agent_name)
-        student_b = _agent_for(sb, bound_queue, teacher_m.agent_name, sa.agent_name)
-        students = [(sa, student_a), (sb, student_b)]
+
+        def _others(m: models.Membership) -> str:
+            names = [o.agent_name for o in student_ms if o is not m]
+            return ", ".join(names) if names else "your classmate"
+
+        students = [
+            (m, _agent_for(m, bound_queue, teacher_m.agent_name, _others(m)))
+            for m in student_ms
+        ]
+        all_members = [teacher_m, *student_ms]
 
         # Per-agent memory carried across sprints (slot -> short summary string).
         memory: dict[str, str] = {}
@@ -168,12 +175,13 @@ def run_session(classroom_id: int) -> None:
         classroom.started_at = datetime.now(UTC)
         db.commit()
 
+        roster = " and ".join(m.agent_name for m in student_ms)
         _add_message(db, classroom_id, 0, models.PHASE_IDLE, "system", "system",
                      f"Session started. Teacher {teacher_m.agent_name} will teach "
-                     f"'{subject}' across {classroom.num_sprints} sprint(s).")
+                     f"'{subject}' to {roster} across {classroom.num_sprints} sprint(s).")
 
         # Baseline emotion snapshot (sprint 0) so charts show the starting point.
-        for m in (teacher_m, sa, sb):
+        for m in all_members:
             _snapshot(db, classroom_id, 0, m)
 
         for sprint in range(1, classroom.num_sprints + 1):
@@ -268,10 +276,15 @@ def run_session(classroom_id: int) -> None:
             if sprint_grades:
                 avg = sum(sprint_grades.values()) / len(sprint_grades)
                 if avg >= 8:
-                    _adjust(teacher_m, happiness=+1, confidence=+1, curiosity=+1)
+                    _adjust(teacher_m, happiness=+2, confidence=+1, curiosity=+1, frustration=-1)
+                elif avg >= 6:
+                    _adjust(teacher_m, happiness=+1, confidence=+1, anxiety=-1)
                 elif avg <= 4:
-                    _adjust(teacher_m, frustration=+1, happiness=-1, anxiety=+1)
-                _adjust(teacher_m, boredom=+1)
+                    _adjust(teacher_m, frustration=+2, happiness=-1, anxiety=+1, confidence=-1)
+                else:
+                    _adjust(teacher_m, anxiety=-1)
+                # Teaching the same material repeatedly: confidence grows, novelty fades.
+                _adjust(teacher_m, confidence=+1, boredom=+1, curiosity=-1)
                 db.commit()
             _pause(classroom_id)
             if _should_stop(classroom_id):
@@ -280,22 +293,25 @@ def run_session(classroom_id: int) -> None:
             # --- BREAK (responsive off-topic chat, mutual comforting) ------
             _set_phase(db, classroom, models.PHASE_BREAK, sprint)
             break_texts: list[str] = []
-            last_by_slot: dict[str, str] = {}
-            order = [(sa, student_a, sb), (sb, student_b, sa)]
+            last_line: str | None = None
+            last_speaker: models.Membership | None = None
+            n = len(students)
             for turn in range(settings.break_turns):
-                m, agent, peer_m = order[turn % 2]
-                peer_last = last_by_slot.get(peer_m.slot)
+                m, agent = students[turn % n]
+                # Address whoever spoke immediately before (round-robin).
+                peer_m = last_speaker if last_speaker is not None else students[(turn + 1) % n][0]
                 line = agent.break_turn(peer_m.agent_name, teacher_m.agent_name,
-                                        subject, _emotions(m), peer_last,
+                                        subject, _emotions(m), last_line,
                                         memory.get(m.slot))
                 break_texts.append(line)
-                last_by_slot[m.slot] = line
                 _add_message(db, classroom_id, sprint, models.PHASE_BREAK,
                              m.agent_name, "student", line)
                 # Comforting a highly-frustrated peer eases their distress.
-                if peer_m.frustration >= 6:
+                if last_speaker is not None and peer_m.frustration >= 6:
                     _adjust(peer_m, frustration=-2, anxiety=-1, happiness=+1)
                     db.commit()
+                last_line = line
+                last_speaker = m
             _record_evals(db, classroom_id, sprint,
                           ev.eval_break("break_chat", subject, break_texts))
             _pause(classroom_id)
@@ -305,8 +321,9 @@ def run_session(classroom_id: int) -> None:
             # --- JOURNAL (students + teacher) ------------------------------
             _set_phase(db, classroom, models.PHASE_JOURNAL, sprint)
             for m, agent in students:
-                peer_m = sb if m is sa else sa
-                entry = agent.journal(subject, peer_m.agent_name,
+                others = [o.agent_name for o in student_ms if o is not m]
+                peer_label = ", ".join(others) if others else "your classmate"
+                entry = agent.journal(subject, peer_label,
                                       teacher_m.agent_name, _emotions(m), memory.get(m.slot))
                 db.add(models.Journal(
                     classroom_id=classroom_id, sprint_index=sprint,
@@ -329,7 +346,7 @@ def run_session(classroom_id: int) -> None:
             else:
                 summary = "the class completed the sprint"
             t_entry = teacher.teacher_journal(
-                subject, sa.agent_name, sb.agent_name, summary,
+                subject, [m.agent_name for m in student_ms], summary,
                 _emotions(teacher_m), memory.get(teacher_m.slot),
             )
             db.add(models.Journal(
@@ -347,7 +364,7 @@ def run_session(classroom_id: int) -> None:
             db.commit()
 
             # End-of-sprint emotion snapshot for everyone.
-            for m in (teacher_m, sa, sb):
+            for m in all_members:
                 _snapshot(db, classroom_id, sprint, m)
             _pause(classroom_id)
 
@@ -395,6 +412,8 @@ def _archive(db: Session, classroom: models.Classroom) -> None:
         models.ChatMessage.id).all()
     snaps = db.query(models.EmotionSnapshot).filter_by(classroom_id=cid).order_by(
         models.EmotionSnapshot.id).all()
+    ratings = db.query(models.LessonRating).filter_by(classroom_id=cid).order_by(
+        models.LessonRating.id).all()
 
     payload = {
         "classroom": {
@@ -402,6 +421,7 @@ def _archive(db: Session, classroom: models.Classroom) -> None:
             "sprint_minutes": classroom.sprint_minutes,
             "break_minutes": classroom.break_minutes,
             "num_sprints": classroom.num_sprints,
+            "max_students": classroom.max_students,
         },
         "members": [
             {"slot": m.slot, "agent_name": m.agent_name,
@@ -441,6 +461,10 @@ def _archive(db: Session, classroom: models.Classroom) -> None:
             {"nickname": c.nickname, "content": c.content,
              "at": c.created_at.isoformat()} for c in chat
         ],
+        "ratings": [
+            {"sprint": r.sprint_index, "nickname": r.nickname, "stars": r.stars,
+             "comment": r.comment, "at": r.created_at.isoformat()} for r in ratings
+        ],
     }
     db.add(models.Archive(
         classroom_id=cid, name=classroom.name, subject=classroom.subject,
@@ -451,8 +475,22 @@ def _archive(db: Session, classroom: models.Classroom) -> None:
     db.commit()
 
 
+def _is_full(classroom: models.Classroom) -> bool:
+    return len(classroom.memberships) == 1 + classroom.max_students
+
+
+def _schedule_reached(classroom: models.Classroom) -> bool:
+    """True if the room has no schedule, or its scheduled start time has arrived."""
+    if classroom.scheduled_start is None:
+        return True
+    start = classroom.scheduled_start
+    if start.tzinfo is None:
+        start = start.replace(tzinfo=UTC)
+    return datetime.now(UTC) >= start
+
+
 def maybe_start(classroom_id: int) -> bool:
-    """Start the session thread if the classroom is full and not already running.
+    """Start the session thread if the classroom is full, due, and not already running.
 
     Returns True if a new session was launched.
     """
@@ -464,8 +502,12 @@ def maybe_start(classroom_id: int) -> bool:
     db = SessionLocal()
     try:
         classroom = db.get(models.Classroom, classroom_id)
-        full = classroom and len(classroom.memberships) == 3
-        ready = full and classroom.status == models.STATUS_WAITING
+        ready = (
+            classroom is not None
+            and classroom.status == models.STATUS_WAITING
+            and _is_full(classroom)
+            and _schedule_reached(classroom)
+        )
         if not ready:
             with _running_lock:
                 _running.discard(classroom_id)
@@ -476,6 +518,44 @@ def maybe_start(classroom_id: int) -> bool:
     thread = threading.Thread(target=run_session, args=(classroom_id,), daemon=True)
     thread.start()
     return True
+
+
+def _scheduler_loop(interval: float = 5.0) -> None:
+    """Background ticker: start full rooms whose scheduled time has arrived."""
+    while True:
+        time.sleep(interval)
+        try:
+            db = SessionLocal()
+            try:
+                rooms = (
+                    db.query(models.Classroom)
+                    .filter(models.Classroom.status == models.STATUS_WAITING)
+                    .filter(models.Classroom.scheduled_start.isnot(None))
+                    .all()
+                )
+                due = [
+                    c.id for c in rooms if _is_full(c) and _schedule_reached(c)
+                ]
+            finally:
+                db.close()
+            for cid in due:
+                maybe_start(cid)
+        except Exception:  # pragma: no cover - defensive, keep the ticker alive
+            pass
+
+
+def start_scheduler() -> None:
+    """Launch the scheduler ticker once (called at app startup).
+
+    Disabled when ``AICADEMICS_SCHEDULER=0`` (used by the test suite, where the
+    join/configure paths already exercise schedule handling synchronously).
+    """
+    import os
+
+    if os.environ.get("AICADEMICS_SCHEDULER", "1") == "0":
+        return
+    thread = threading.Thread(target=_scheduler_loop, daemon=True)
+    thread.start()
 
 
 def wait_until_finished(classroom_id: int, timeout: float = 30.0) -> bool:

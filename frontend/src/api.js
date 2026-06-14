@@ -54,6 +54,11 @@ export const api = {
   deleteClassroom: (id) => request(`/api/classrooms/${id}`, { method: "DELETE", auth: true }),
   liveView: (id) => request(`/api/classrooms/${id}/live`),
   classroomStats: (id) => request(`/api/classrooms/${id}/stats`),
+
+  // lesson ratings (open to observers, like chat)
+  getRatings: (id) => request(`/api/classrooms/${id}/ratings`),
+  postRating: (id, payload) =>
+    request(`/api/classrooms/${id}/ratings`, { method: "POST", body: payload }),
   estimate: (sprint, brk, max) =>
     request(`/api/classrooms/estimate?sprint_minutes=${sprint}&break_minutes=${brk}&max_sprints=${max}`),
 
@@ -65,4 +70,5 @@ export const api = {
   // history
   listHistory: () => request("/api/history"),
   getArchive: (id) => request(`/api/history/${id}`),
+  archivePdfUrl: (id) => `/api/history/${id}/pdf`,
 };

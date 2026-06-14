@@ -57,6 +57,9 @@ class TeacherConfig(BaseModel):
     sprint_minutes: int = Field(default=20, ge=1, le=180)
     break_minutes: int = Field(default=10, ge=0, le=120)
     num_sprints: int = Field(default=2, ge=1, le=12)
+    num_students: int = Field(default=2, ge=2, le=5)
+    # Optional: schedule the session to start no earlier than this time.
+    scheduled_start: datetime | None = None
 
 
 class CreateClassroomRequest(BaseModel):
@@ -89,6 +92,8 @@ class ClassroomOut(BaseModel):
     sprint_minutes: int
     break_minutes: int
     num_sprints: int
+    max_students: int
+    scheduled_start: datetime | None
     current_sprint: int
     phase: str
     members: list[MemberOut]
@@ -227,6 +232,34 @@ class ChatOut(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+# ---------------------------------------------------------------------------
+# Lesson ratings (observers)
+# ---------------------------------------------------------------------------
+class RatingPost(BaseModel):
+    nickname: str = Field(min_length=1, max_length=60)
+    stars: int = Field(ge=1, le=5)
+    comment: str = Field(default="", max_length=1000)
+    sprint_index: int | None = None
+
+
+class RatingOut(BaseModel):
+    id: int
+    sprint_index: int | None
+    nickname: str
+    stars: int
+    comment: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class RatingSummary(BaseModel):
+    count: int
+    average: float
+    ratings: list[RatingOut]
 
 
 # ---------------------------------------------------------------------------

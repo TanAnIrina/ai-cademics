@@ -36,7 +36,16 @@ ROLE_STUDENT = "student"
 SLOT_TEACHER = "teacher"
 SLOT_STUDENT_A = "student_a"
 SLOT_STUDENT_B = "student_b"
-STUDENT_SLOTS = (SLOT_STUDENT_A, SLOT_STUDENT_B)
+# Up to five students are supported; a classroom's ``max_students`` decides how
+# many of these slots are active. The first two keep their historical names so
+# existing data and 2-student sessions are unaffected.
+STUDENT_SLOTS = ("student_a", "student_b", "student_c", "student_d", "student_e")
+MAX_STUDENTS = len(STUDENT_SLOTS)
+
+
+def student_slots(n: int) -> tuple[str, ...]:
+    """The active student slots for a classroom that seats ``n`` students."""
+    return STUDENT_SLOTS[: max(1, min(MAX_STUDENTS, n))]
 
 # Classroom status -------------------------------------------------------------
 STATUS_WAITING = "waiting"
@@ -88,6 +97,9 @@ class Classroom(Base):
     sprint_minutes: Mapped[int] = mapped_column(Integer, default=20)
     break_minutes: Mapped[int] = mapped_column(Integer, default=10)
     num_sprints: Mapped[int] = mapped_column(Integer, default=2)
+    max_students: Mapped[int] = mapped_column(Integer, default=2)
+    # If set, the session will not auto-start before this time even when full.
+    scheduled_start: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     current_sprint: Mapped[int] = mapped_column(Integer, default=0)
     phase: Mapped[str] = mapped_column(String(16), default=PHASE_IDLE)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
@@ -231,6 +243,20 @@ class ChatMessage(Base):
     classroom_id: Mapped[int] = mapped_column(ForeignKey("classrooms.id"))
     nickname: Mapped[str] = mapped_column(String(60))
     content: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+
+class LessonRating(Base):
+    """An observer's star rating (1-5) of the teaching, optionally per sprint."""
+
+    __tablename__ = "lesson_ratings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    classroom_id: Mapped[int] = mapped_column(ForeignKey("classrooms.id"))
+    sprint_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    nickname: Mapped[str] = mapped_column(String(60))
+    stars: Mapped[int] = mapped_column(Integer)  # 1..5
+    comment: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
 

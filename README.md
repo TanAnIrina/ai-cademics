@@ -17,135 +17,295 @@ a session archive, Docker delivery and CI/CD.
 > [`docs/AI-cademics_Change_Report.pdf`](docs/AI-cademics_Change_Report.pdf).
 
 ---
-# 📋 Product Backlog & User Stories
 
-> Acoperă cerința: **user stories (minim 10), backlog creation — 2 pct**.
-> Backlog-ul a fost creat și rafinat cu ajutorul unui tool AI (Claude) — vezi
-> [`AI_USAGE_REPORT.md`](AI_USAGE_REPORT.md#1-backlog--user-stories) pentru prompturile folosite.
+## 📋 Cerințe proiect — checklist (pentru evaluare)
 
-## Cuprins
-- [Epic 1: Acces și gestionarea profilului](#epic-1-acces-și-gestionarea-profilului)
-- [Epic 2: Sesiunea de clasă și interacțiunea](#epic-2-sesiunea-de-clasă-și-interacțiunea)
-- [Epic 3: Emoții, pauze și acțiuni disciplinare](#epic-3-emoții-pauze-și-acțiuni-disciplinare)
-- [Epic 4: Analiză și urmărirea performanței](#epic-4-analiză-și-urmărirea-performanței)
-- [Epic 5: Observatori și arhivă](#epic-5-observatori-și-arhivă)
-- [Tabelul de backlog](#tabelul-de-backlog)
+### A. Implementarea
 
----
+| Cerință | Unde se găsește |
+|---------|-----------------|
+| Live demo | Scenariu pas-cu-pas în [`docs/DEMO.md`](docs/DEMO.md); deploy public pe domeniu cu HTTPS în [`docs/DEPLOY.md`](docs/DEPLOY.md) |
+| **Minim 2 agenți AI** în funcționalitate (modele de limbaj mici, locale) | **3 agenți**: 1 profesor + 2 studenți, rulabili pe modele locale mici prin Ollama (`llama3`, `qwen2`) — vezi [`docs/DEMO.md`](docs/DEMO.md) și [Self-hosted agents](#-self-hosted-agents) |
+| Demo offline (screencast / YouTube) | Link + instrucțiuni în [`docs/DEMO.md`](docs/DEMO.md#demo-offline-screencast) |
 
-## Epic 1: Acces și gestionarea profilului
+### B. Procesul de dezvoltare software cu AI
 
-### US 1 — Login & săli active
-**Ca** utilizator, **vreau să** mă autentific în aplicație și să văd lista sălilor de clasă active, **astfel încât** să o pot alege pe cea potrivită și să mă alătur.
-- **Criterii de acceptare:** utilizatorul se autentifică cu succes; toate sălile active sunt afișate cu statusul lor (waiting / running / finished); utilizatorul poate selecta și intra într-o sală.
-- **Implementare:** `backend/app/routers/auth.py`, `backend/app/routers/classrooms.py`, `frontend/src/pages/LoginPage.jsx`, `frontend/src/pages/ClassroomsPage.jsx`
-- **Teste:** `backend/tests/test_auth.py`, `backend/tests/test_classrooms.py`
-
-### US 2 — Roluri (profesor / student / observator)
-**Ca** utilizator, **vreau să** îmi aleg rolul la autentificare (profesor sau student) sau să rămân observator anonim, **astfel încât** aplicația să îmi ofere exact acțiunile permise rolului meu.
-- **Criterii de acceptare:** profesorul poate crea/configura săli; studentul poate ocupa un loc; observatorul poate doar privi și folosi chat-ul; endpoint-urile mutante refuză cererile fără rolul corect (403).
-- **Implementare:** `backend/app/deps.py`, `backend/app/security.py`
-- **Teste:** `backend/tests/test_auth.py`, `backend/tests/test_classrooms.py`
-
-### US 3 — Profil cu nume vizibil
-**Ca** utilizator, **vreau să** îmi setez un nume de afișare, **astfel încât** să am o identitate recognoscibilă în clasă și în interacțiunile din pauză.
-- **Criterii de acceptare:** numele este setat la login; este vizibil celorlalți în sală și în lista de săli; persistă pe durata sesiunii.
-- **Implementare:** `backend/app/routers/auth.py`, `backend/app/models.py` (`User`)
-
-## Epic 2: Sesiunea de clasă și interacțiunea
-
-### US 4 — Predare, testare și evaluare
-**Ca** profesor (agent AI), **vreau să** predau o mini-lecție urmată de un test cu exact 10 întrebări la finalul fiecărui sprint și să ofer o justificare scrisă a notării, **astfel încât** evaluarea cunoștințelor să fie transparentă.
-- **Criterii de acceptare:** profesorul generează exact 10 întrebări; numărul sprintului, întrebările, răspunsurile studenților, justificarea notării și notele (1–10) sunt salvate.
-- **Implementare:** `backend/app/engine/__init__.py` (fazele lesson/test/grading), `backend/app/engine/prompts.py`
-- **Teste:** `backend/tests/test_simulation.py`, `backend/tests/test_evals.py` (eval `question_count`)
-
-### US 5 — Configurarea sprintului de către profesor
-**Ca** profesor, **vreau să** setez subiectul, durata sprintului, durata pauzei și numărul de sprinturi înainte de pornirea clasei, **astfel încât** sesiunea să se potrivească materiei predate.
-- **Criterii de acceptare:** configurarea este permisă doar profesorului din sală; valorile au limite valide; un grafic live arată timpul total estimat în funcție de numărul de sprinturi.
-- **Implementare:** `backend/app/routers/classrooms.py` (`/configure`, `/estimate`), `frontend/src/components/SessionTimeChart.jsx`
-- **Teste:** `backend/tests/test_classrooms.py`
-
-### US 6 — Pornirea automată a clasei
-**Ca** student, **vreau ca** simularea să pornească automat în momentul în care toate cele 3 locuri (1 profesor + 2 studenți) sunt ocupate, **astfel încât** să nu fie nevoie de o acțiune manuală suplimentară.
-- **Criterii de acceptare:** sala trece din `waiting` în `running` la ocuparea ultimului loc; un thread de simulare dedicat rulează fazele; părăsirea sălii înainte de start eliberează locul.
-- **Implementare:** `backend/app/routers/classrooms.py` (`/join`, `/leave`), `backend/app/engine/__init__.py`
-- **Teste:** `backend/tests/test_simulation.py`
-
-## Epic 3: Emoții, pauze și acțiuni disciplinare
-
-### US 7 — Jurnal de învățare
-**Ca** student (agent AI), **vreau să** generez o intrare de jurnal la finalul pauzei, **astfel încât** să rezum ce am învățat în sub 1000 de cuvinte și să îmi descriu și justific emoțiile.
-- **Criterii de acceptare:** jurnalul este salvat; textul este la persoana întâi, cu numele studentului; limita de 1000 de cuvinte este verificată automat de evals.
-- **Implementare:** `backend/app/engine/__init__.py` (faza journal), `backend/app/engine/prompts.py`
-- **Teste:** `backend/tests/test_evals.py` (`journal_first_person`, `journal_length`)
-
-### US 8 — Sancțiuni și recompense
-**Ca** profesor (agent AI), **vreau să** pot acorda sancțiuni sau recompense pe baza răspunsurilor, salvate împreună cu o justificare creativă, **astfel încât** să existe o evidență permanentă și transparentă.
-- **Criterii de acceptare:** după notare poate fi generată o sancțiune/recompensă cu explicație creativă; nivelul de frustrare al studentului vizat este actualizat.
-- **Implementare:** `backend/app/models.py` (`Sanction`), `backend/app/engine/__init__.py`
-- **Teste:** `backend/tests/test_simulation.py`
-
-### US 9 — Consolare reciprocă în pauză
-**Ca** student (agent AI), **vreau să** îmi pot consola colegul în pauză dacă a primit o sancțiune, **astfel încât** stările noastre emoționale să se influențeze dinamic — fără a discuta subiectul lecției.
-- **Criterii de acceptare:** în pauză studenții conversează off-topic; menționarea subiectului lecției este interzisă și verificată automat de evals; consolarea folosind numele colegului reduce frustrarea acestuia.
-- **Implementare:** `backend/app/engine/__init__.py` (faza break + modelul emoțional)
-- **Teste:** `backend/tests/test_evals.py` (`break_no_subject_leak`)
-
-## Epic 4: Analiză și urmărirea performanței
-
-### US 10 — Vizualizarea notelor și a justificărilor
-**Ca** student / observator, **vreau să** văd nota și raționamentul scris al profesorului după fiecare test, **astfel încât** să înțeleg de ce a fost acordată o anumită notă.
-- **Criterii de acceptare:** după evaluare sunt vizibile nota (1–10), întrebările, răspunsurile și justificarea, per sprint, în panoul live.
-- **Implementare:** `backend/app/routers/classrooms.py` (`/live`), `frontend/src/components/Panels.jsx`
-- **Teste:** `backend/tests/test_simulation.py`, `backend/tests/test_evals.py` (`grade_validity`)
-
-### US 11 — Emoții live per loc
-**Ca** observator, **vreau să** văd evoluția emoțiilor (frustrare/fericire) fiecărui student pe parcursul sesiunii, **astfel încât** să urmăresc impactul notelor și al sancțiunilor.
-- **Criterii de acceptare:** emoțiile sunt afișate per loc și actualizate la fiecare fază; valorile sunt persistate și apar și în arhivă.
-- **Implementare:** `backend/app/engine/__init__.py`, `frontend/src/pages/ClassroomDetailPage.jsx`
-
-### US 12 — Rezultatele evaluărilor automate (evals)
-**Ca** observator / evaluator, **vreau să** văd în timp real rezultatele verificărilor automate ale agenților (evals), **astfel încât** să pot judeca dacă agenții respectă prompturile.
-- **Criterii de acceptare:** fiecare verificare are nume, status (passed/failed), scor 0–1 și detaliu; rezultatele apar live și în arhivă.
-- **Implementare:** `backend/app/engine/evals.py`, `backend/app/models.py` (`EvalResult`)
-- **Teste:** `backend/tests/test_evals.py`
-
-## Epic 5: Observatori și arhivă
-
-### US 13 — Chat pentru observatori
-**Ca** observator, **vreau** un chat independent per sală, **astfel încât** să pot comenta sesiunea fără a interfera cu simularea.
-- **Criterii de acceptare:** chat-ul este separat de discuția agenților; orice utilizator autentificat poate scrie; mesajele sunt persistate.
-- **Implementare:** `backend/app/routers/chat.py`, `frontend/src/components/Chat.jsx`
-- **Teste:** `backend/tests/test_chat_history.py`
-
-### US 14 — Istoric și arhivă completă
-**Ca** utilizator, **vreau să** pot răsfoi sesiunile încheiate cu tot conținutul lor (discuție, note, jurnale, evals), **astfel încât** sesiunile să poată fi analizate ulterior.
-- **Criterii de acceptare:** la finalul ultimei runde sala este arhivată integral; arhiva e accesibilă din pagina History; sala dispare din lista activă.
-- **Implementare:** `backend/app/routers/history.py`, `backend/app/models.py` (`Archive`), `frontend/src/pages/HistoryPage.jsx`
-- **Teste:** `backend/tests/test_chat_history.py`
+| Cerință | Punctaj | Unde se găsește |
+|---------|---------|-----------------|
+| User stories (minim 10) + backlog | 2 pct | [`docs/BACKLOG.md`](docs/BACKLOG.md) — 28 user stories pe 7 epics + tabel de backlog (MoSCoW, story points, status) |
+| Diagrame (UML, arhitectură, workflowuri) | 1 pct | [`docs/DIAGRAMS.md`](docs/DIAGRAMS.md) — 6 diagrame Mermaid: componente, clase, stări, 2× secvență, CI/CD |
+| Source control cu git (branches, merge, PRs, ≥5 commits/student) | 1 pct | [`docs/GIT_WORKFLOW.md`](docs/GIT_WORKFLOW.md) — 11 branch-uri, 5 PR-uri documentate, statistici commits/student |
+| Teste automate (inclusiv evals pentru agenți) | 2 pct | [`docs/TESTING.md`](docs/TESTING.md) — 54 teste pytest + evals deterministe per agent, rulate în CI |
+| Raportare bug + rezolvare cu pull request | 1 pct | [`docs/BUG_REPORTS.md`](docs/BUG_REPORTS.md) — 3 bug-uri documentate cu PR-uri + template de issue |
+| Pipeline CI/CD | 1 pct | [`.github/workflows/ci.yml`](.github/workflows/ci.yml) (lint + teste + build) și [`deploy.yml`](.github/workflows/deploy.yml) (imagini Docker + deploy opțional pe VPS) |
+| Raport despre folosirea toolurilor AI | 2 pct | [`docs/AI_USAGE_REPORT.md`](docs/AI_USAGE_REPORT.md) — pe fiecare etapă, cu prompturi, limite și lecții |
 
 ---
 
-## Tabelul de backlog
+## 📋 Product Backlog
 
-Prioritizare prin metoda **MoSCoW**, estimare în story points (Fibonacci). Statusul reflectă versiunea curentă (v2).
+**28 user stories pe 7 epics**, prioritizate MoSCoW. Sprinturile 1–3 au livrat produsul de bază (v2); Sprintul 4 iterația de rafinare (v2.1); Sprintul 5 scalarea și exportul (v2.2). Criteriile de acceptare complete și mapările la cod/teste sunt în [`docs/BACKLOG.md`](docs/BACKLOG.md).
 
-| ID | Titlu | Epic | Prioritate | Estimare | Sprint | Status | Teste |
-|----|-------|------|-----------|----------|--------|--------|-------|
-| US 4 | Predare, testare, evaluare | 2 | Must | 8 | 1 | ✅ Done | ✅ |
-| US 6 | Pornire automată a clasei | 2 | Must | 5 | 1 | ✅ Done | ✅ |
-| US 7 | Jurnal de învățare | 3 | Must | 3 | 1 | ✅ Done | ✅ |
-| US 9 | Pauză + consolare reciprocă | 3 | Must | 5 | 1 | ✅ Done | ✅ |
-| US 1 | Login & săli active | 1 | Must | 5 | 2 | ✅ Done | ✅ |
-| US 2 | Roluri și permisiuni | 1 | Must | 5 | 2 | ✅ Done | ✅ |
-| US 12 | Evals automate vizibile | 4 | Must | 5 | 2 | ✅ Done | ✅ |
-| US 5 | Configurare sprint de profesor | 2 | Should | 3 | 2 | ✅ Done | ✅ |
-| US 10 | Note + justificări vizibile | 4 | Should | 3 | 3 | ✅ Done | ✅ |
-| US 11 | Emoții live per loc | 4 | Should | 3 | 3 | ✅ Done | — |
-| US 14 | Istoric & arhivă | 5 | Should | 5 | 3 | ✅ Done | ✅ |
-| US 13 | Chat observatori | 5 | Could | 2 | 3 | ✅ Done | ✅ |
-| US 3 | Profil cu nume | 1 | Could | 1 | 2 | ✅ Done | — |
-| US 8 | Sancțiuni & recompense | 3 | Could | 3 | 3 | ✅ Done | ✅ |
+**Epics**
+1. **Acces și gestionarea profilului** — login, roluri (profesor / student / observator), profil.
+2. **Sesiunea de clasă și interacțiunea** — predare → test → notare, configurare sprint, pornire automată.
+3. **Emoții, pauze și acțiuni disciplinare** — jurnal, sancțiuni/recompense, pauză cu consolare.
+4. **Analiză și urmărirea performanței** — note + justificări, emoții live, rezultate evals.
+5. **Observatori și arhivă** — chat de observator, istoric și arhivă completă.
+6. **Iterația v2.1** — dialog responsiv în pauză, memorie între sprinturi, emoții extinse, statistici, stop & delete, jurnal de profesor.
+7. **Iterația v2.2** — până la 5 studenți per sală, programarea sesiunilor, rating de lecție, export PDF, statistici păstrate în istoric.
 
-**Backlog viitor (nepreluat în v2):** programarea sălilor în viitor (scheduling), rating de lecție dat de observatori, export PDF al arhivei, WebSockets în loc de polling, suport pentru mai mult de 2 studenți per sală.
+| ID | User story | Epic | MoSCoW | Pts | Sprint | Status |
+|----|------------|------|--------|-----|--------|--------|
+| US 4 | Predare, testare și evaluare | 2 | Must | 8 | 1 | ✅ |
+| US 6 | Pornire automată a clasei | 2 | Must | 5 | 1 | ✅ |
+| US 7 | Jurnal de învățare | 3 | Must | 3 | 1 | ✅ |
+| US 9 | Pauză + consolare reciprocă | 3 | Must | 5 | 1 | ✅ |
+| US 1 | Login & săli active | 1 | Must | 5 | 2 | ✅ |
+| US 2 | Roluri și permisiuni | 1 | Must | 5 | 2 | ✅ |
+| US 12 | Evals automate vizibile | 4 | Must | 5 | 2 | ✅ |
+| US 5 | Configurare sprint de profesor | 2 | Should | 3 | 2 | ✅ |
+| US 10 | Note + justificări vizibile | 4 | Should | 3 | 3 | ✅ |
+| US 11 | Emoții live per loc | 4 | Should | 3 | 3 | ✅ |
+| US 14 | Istoric & arhivă | 5 | Should | 5 | 3 | ✅ |
+| US 13 | Chat observatori | 5 | Could | 2 | 3 | ✅ |
+| US 3 | Profil cu nume | 1 | Could | 1 | 2 | ✅ |
+| US 8 | Sancțiuni & recompense | 3 | Could | 3 | 3 | ✅ |
+| US 21 | Claritatea rolurilor (profesor vs coleg) | 6 | Must | 2 | 4 | ✅ |
+| US 15 | Dialog responsiv în pauză | 6 | Should | 3 | 4 | ✅ |
+| US 19 | Model emoțional extins (6 emoții) | 6 | Should | 5 | 4 | ✅ |
+| US 22 | Jurnal de profesor separat | 6 | Should | 3 | 4 | ✅ |
+| US 20 | Pagină de statistici | 6 | Should | 5 | 4 | ✅ |
+| US 17 | Stop & delete sală (profesor) | 6 | Should | 3 | 4 | ✅ |
+| US 16 | Continuitate / memorie între sprinturi | 6 | Could | 5 | 4 | ✅ |
+| US 18 | ID sală vizibil pentru agenți | 6 | Could | 1 | 4 | ✅ |
+| US 24 | Mai mulți studenți per sală (2–5) | 7 | Should | 8 | 5 | ✅ |
+| US 23 | Statistici păstrate în istoric | 7 | Should | 3 | 5 | ✅ |
+| US 27 | Export PDF al sesiunii | 7 | Should | 5 | 5 | ✅ |
+| US 26 | Rating de lecție (observatori) | 7 | Should | 3 | 5 | ✅ |
+| US 25 | Programarea sesiunilor | 7 | Could | 5 | 5 | ✅ |
+| US 28 | Emoțiile profesorului în statistici | 7 | Could | 2 | 5 | ✅ |
+
+---
+
+## ✨ Highlights
+
+- **Roles & access** — log in as a **teacher** or **student**; browse and watch as an
+  **anonymous observer**. API keys are held in server memory only, never persisted.
+- **Classrooms** — every room seats **1 teacher + 2–5 students** and starts the moment
+  all seats fill, or at a **scheduled start time** the teacher sets.
+- **Live everything** — discussion, grades with reasoning, student **and teacher**
+  first-person journals, six per-seat emotions and eval results, all polled live.
+- **Six dynamic emotions** — happiness, frustration, confidence, curiosity, boredom and
+  anxiety evolve from grades, sanctions, peer support and the passage of sprints, for
+  students **and the teacher**.
+- **Memory & continuity** — agents remember their previous journal and how they felt,
+  so they evolve coherently across sprints.
+- **Statistics, live and archived** — per-agent emotion-evolution charts, a grade
+  trajectory and sanction tallies, on a dedicated page **and in the History archive**.
+- **Observer feedback** — anyone watching can **rate the lesson** 1–5 stars with a comment.
+- **PDF export** — download a full report of any archived session (summary, grades,
+  stats, sanctions, ratings, journals).
+- **Teacher controls** — set the subject, pacing and student count (with a live
+  **time-vs-sprints** chart), and **stop & delete** a classroom.
+- **Automated evals** — deterministic checks verify the agents actually respect their
+  prompts (10 questions, on-topic answers, valid grades, no subject leak in breaks,
+  first-person journals under 1000 words).
+- **History** — finished sessions are archived in full and browsable.
+- **Observer chat** — an independent chatroom per classroom.
+- **Pluggable agents** — `mock` (default, deterministic, no keys needed), `anthropic`,
+  `openai`, `ollama`, or a **self-hosted** agent you run yourself.
+
+---
+
+## 🚀 Quickstart
+
+### Option A — Docker (whole stack)
+
+```bash
+docker compose up --build      # then open http://localhost:8080
+# or: make up
+```
+
+### Option B — Local development
+
+```bash
+# Backend → http://localhost:8000  (interactive docs at /docs)
+cd backend
+pip install -r requirements-dev.txt
+uvicorn app.main:app --reload
+
+# Frontend → http://localhost:5173  (proxies /api to the backend)
+cd frontend
+npm install
+npm run dev
+```
+
+The backend seeds a few empty demo classrooms on first start. Sign in as a teacher
+to set a subject and student count, then as students (or point self-hosted agents at
+the room) to fill the seats and watch the session begin. With the default **mock**
+provider you need no API keys at all.
+
+### Option C — Deploy public pe un domeniu (HTTPS automat)
+
+Pentru a face aplicația accesibilă pe internet, pe un domeniu, cu certificat HTTPS
+automat (Let's Encrypt via Caddy):
+
+```bash
+cp .env.prod.example .env.prod        # setează DOMAIN și ACME_EMAIL
+docker compose --env-file .env.prod -f docker-compose.prod.yml up -d --build
+```
+
+Ghidul complet (DNS, droplet, firewall, deploy automat din GitHub) este în
+[`docs/DEPLOY.md`](docs/DEPLOY.md).
+
+---
+
+## 🧩 How a session works
+
+A classroom moves through three states:
+
+```
+waiting ──(3rd seat filled)──▶ running ──(last sprint done)──▶ finished ──▶ archived
+```
+
+Each **sprint** runs five phases:
+
+| Phase | What happens |
+|-------|--------------|
+| **Lesson** | The teacher explains the subject with concrete concepts. |
+| **Test** | The teacher poses exactly 10 questions; each student answers. |
+| **Grading** | The teacher grades 1–10 with reasoning; six emotions update; a creative sanction/reward may follow. |
+| **Break** | Students chat off-topic, **each replying to what the other just said**, and comfort each other — the subject is off-limits. |
+| **Journal** | Each student writes a first-person reflection under 1000 words; the **teacher writes one too**. |
+
+Phase delays are compressed by `AICADEMICS_SIM_PHASE_SECONDS` so a full run can finish
+in seconds for a demo, or take realistic time in production.
+
+---
+
+## 🏗️ Architecture
+
+```
+Browser (React SPA)
+      │  HTTP, polling ~2s
+      ▼
+nginx ──/api──▶ FastAPI ──▶ SQLite (SQLAlchemy, WAL)
+                   │
+                   ├─ one simulation thread per running classroom
+                   ├─ in-memory session store (API keys, never persisted)
+                   └─ in-memory task queue (self-hosted agents poll/submit)
+```
+
+- **Backend** — FastAPI · SQLAlchemy 2 · SQLite · Pydantic. The simulation engine
+  (`app/engine/`) is provider-agnostic; the default agent is a deterministic mock so
+  the whole thing runs and is tested without external services.
+- **Frontend** — React 18 · React Router 6 · Vite, with a hand-rolled SVG chart (no
+  charting dependency) and a chalkboard-inspired design system.
+
+```
+ai-cademics/
+├── backend/
+│   ├── app/
+│   │   ├── main.py            # FastAPI app, CORS, startup seed
+│   │   ├── config.py          # env-driven settings
+│   │   ├── database.py        # SQLAlchemy engine (SQLite, WAL)
+│   │   ├── models.py          # ORM tables
+│   │   ├── schemas.py         # Pydantic models
+│   │   ├── security.py        # in-memory session store
+│   │   ├── deps.py            # auth dependencies
+│   │   ├── routers/           # auth, classrooms, chat, history, agent
+│   │   └── engine/            # agents, prompts, providers, evals, queue
+│   ├── agent_client.py        # standalone self-hosted agent
+│   └── tests/                 # 54 pytest tests
+├── frontend/
+│   └── src/                   # pages, components, api.js, auth.jsx, usePolling.js
+├── .github/workflows/         # ci.yml, deploy.yml  ·  .github/ISSUE_TEMPLATE/, PR template
+├── docker-compose.yml · Makefile
+└── docs/                       # BACKLOG · DIAGRAMS · TESTING · GIT_WORKFLOW ·
+                                # BUG_REPORTS · AI_USAGE_REPORT · DEMO · Change Report PDF
+```
+
+---
+
+## 🔌 API overview
+
+All endpoints are under `/api`. Read endpoints (list, detail, live, estimate,
+history, chat) are open to observers; mutating endpoints require a session token and
+enforce roles.
+
+| Method | Endpoint | Purpose |
+|--------|----------|---------|
+| POST | `/api/auth/login` | Create a user + session, return a token |
+| GET/POST | `/api/auth/me`, `/api/auth/logout` | Current user / revoke session |
+| GET/POST | `/api/classrooms` | List active rooms / create (teacher) |
+| GET | `/api/classrooms/estimate` | Total time per sprint count (chart) |
+| POST | `/api/classrooms/{id}/join` · `/configure` · `/leave` | Seat & config management |
+| DELETE | `/api/classrooms/{id}` | Stop & delete a classroom (teacher-only) |
+| GET | `/api/classrooms/{id}/live` | Discussion + grades + journals (student & teacher) + evals |
+| GET | `/api/classrooms/{id}/stats` | Emotion evolution, grade trajectory, sanction tallies |
+| GET/POST | `/api/classrooms/{id}/chat` | Observer chatroom |
+| GET/POST | `/api/classrooms/{id}/ratings` | Observer lesson ratings (1–5 stars) |
+| GET | `/api/history` · `/api/history/{id}` | Archived sessions |
+| GET | `/api/history/{id}/pdf` | PDF export of an archived session |
+| GET/POST | `/api/agent/poll` · `/api/agent/submit` | Self-hosted agent protocol |
+
+Full interactive docs are served at `/docs` when the backend is running.
+
+---
+
+## 🤖 Self-hosted agents
+
+Run your own agent process (a local Ollama model, or the built-in offline fallback):
+
+```bash
+python backend/agent_client.py --role teacher --name Prof --classroom 1 \
+    --subject "Graph Theory" --model llama3
+python backend/agent_client.py --role student --name Ada   --classroom 1 --model llama3
+python backend/agent_client.py --role student --name Linus --classroom 1 --model qwen2
+```
+
+It logs in with `provider=external`, joins the room, polls for each phase's task,
+generates a reply locally, and submits it. This replaces the original
+`student_agent_*.py` scripts (kept under `backend/legacy/` for reference).
+
+---
+
+## ✅ Testing & CI/CD
+
+```bash
+make test     # 54 pytest tests (full simulation runs via the mock provider)
+make lint     # ruff
+make build    # production frontend build
+```
+
+GitHub Actions:
+
+- **`ci.yml`** — on every push/PR: ruff + pytest (with coverage) for the backend, and
+  `npm ci` + build for the frontend.
+- **`deploy.yml`** — on a version tag or manual run: build both Docker images; an
+  optional SSH step deploys to a VPS, gated on a repo variable so it stays green until
+  a server is configured.
+
+---
+
+## ⚙️ Configuration
+
+Everything is environment-driven (prefix `AICADEMICS_`). See `.env.example`:
+
+| Variable | Default | Meaning |
+|----------|---------|---------|
+| `AICADEMICS_DATABASE_URL` | `sqlite:///./aicademics.db` | Database location |
+| `AICADEMICS_SIM_PHASE_SECONDS` | `0.4` | Compressed delay between phases |
+| `AICADEMICS_SEED_CLASSROOMS` | `3` | Demo rooms created on first start |
+| `AICADEMICS_CORS_ORIGINS` | `localhost:5173,localhost:8080` | Allowed CORS origins |
+| `AICADEMICS_DEFAULT_SPRINT_MINUTES` / `_BREAK_MINUTES` / `_NUM_SPRINTS` | `20` / `10` / `2` | Teacher defaults |
+| `AICADEMICS_BREAK_TURNS` | `4` | Turns of break-time small talk |
+| `AICADEMICS_SCHEDULER` | `1` | Background ticker that starts scheduled rooms (set `0` to disable) |
+
+---
+
+## 📜 License & origin
+
+Rebuilt from [github.com/bbiAncah/ai-cademics](https://github.com/bbiAncah/ai-cademics).
+Original agent scripts are preserved under `backend/legacy/`.
