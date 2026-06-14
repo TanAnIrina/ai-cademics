@@ -1,0 +1,45 @@
+name: 🐞 Bug report
+description: Raportează un bug — va fi rezolvat printr-un branch fix/* și un pull request.
+title: "[BUG] "
+labels: ["bug"]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: Descrierea bug-ului
+      description: Ce nu funcționează?
+      placeholder: După primul sprint, agenții nu mai răspund...
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Pași de reproducere
+      placeholder: |
+        1. docker compose up --build
+        2. Login ca profesor, configurează sala
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Comportament așteptat
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Comportament observat
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Loguri / traceback
+      render: shell
+  - type: input
+    id: env
+    attributes:
+      label: Mediu
+      placeholder: "OS, Python, Node, provider de agent (mock/ollama/...)"

@@ -1,0 +1,28 @@
+name: ✨ Feature request
+description: Propune o funcționalitate nouă, formulată ca user story.
+title: "[US] "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: story
+    attributes:
+      label: User story
+      placeholder: "Ca <rol>, vreau să <acțiune>, astfel încât <beneficiu>."
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Criterii de acceptare
+      placeholder: |
+        - [ ] ...
+        - [ ] ...
+    validations:
+      required: true
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Prioritate (MoSCoW)
+      options: ["Must", "Should", "Could", "Won't (deocamdată)"]
+    validations:
+      required: true

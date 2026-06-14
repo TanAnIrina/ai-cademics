@@ -1,0 +1,53 @@
+# Producție: stack expus pe internet, pe un domeniu, cu HTTPS automat.
+#
+# Folosire pe server (după ce ai pus .env.prod și ai creat A record-ul DNS):
+#     docker compose --env-file .env.prod -f docker-compose.prod.yml up -d --build
+#
+# Doar Caddy publică porturi către exterior (80/443). Backend și frontend
+# rămân pe rețeaua internă a compose-ului.
+services:
+  backend:
+    build: ./backend
+    image: aicademics-backend:latest
+    environment:
+      AICADEMICS_DATABASE_URL: sqlite:////data/aicademics.db
+      AICADEMICS_SIM_PHASE_SECONDS: "${AICADEMICS_SIM_PHASE_SECONDS:-0.6}"
+      AICADEMICS_SEED_CLASSROOMS: "${AICADEMICS_SEED_CLASSROOMS:-3}"
+      # Frontend-ul e same-origin prin nginx, dar setăm originea corectă
+      # pentru orice apel direct la API de pe domeniu.
+      AICADEMICS_CORS_ORIGINS: "https://${DOMAIN}"
+    volumes:
+      - aicademics-data:/data
+    expose:
+      - "8000"
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    image: aicademics-frontend:latest
+    depends_on:
+      - backend
+    expose:
+      - "80"
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2-alpine
+    depends_on:
+      - frontend
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: "${DOMAIN}"
+      ACME_EMAIL: "${ACME_EMAIL}"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    restart: unless-stopped
+
+volumes:
+  aicademics-data:
+  caddy-data:
+  caddy-config:

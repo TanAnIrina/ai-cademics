@@ -1,0 +1,21 @@
+# Caddy edge proxy — HTTPS automat (Let's Encrypt) pentru domeniul public.
+# Domeniul și emailul vin din variabile de mediu (vezi .env.prod / docker-compose.prod.yml).
+{
+	email {$ACME_EMAIL}
+}
+
+{$DOMAIN} {
+	encode zstd gzip
+
+	# Tot traficul merge către containerul frontend (nginx), care servește
+	# SPA-ul și face deja proxy pentru /api către backend pe rețeaua compose.
+	reverse_proxy frontend:80
+
+	header {
+		# întărire de bază a securității
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "SAMEORIGIN"
+		Referrer-Policy "strict-origin-when-cross-origin"
+	}
+}
