@@ -1,10 +1,5 @@
 # 📋 Product Backlog & User Stories
 
-> Acoperă cerința: **user stories (minim 10), backlog creation — 2 pct**.
-> **32 user stories pe 8 epics**, prioritizate MoSCoW, cu estimări în story points
-> și status. Backlog-ul a fost creat și rafinat cu ajutorul unui tool AI (Claude) —
-> vezi [`AI_USAGE_REPORT.md`](AI_USAGE_REPORT.md#1-backlog--user-stories) pentru prompturi.
-
 ## Cuprins
 - [Epic 1: Acces și gestionarea profilului](#epic-1-acces-și-gestionarea-profilului)
 - [Epic 2: Sesiunea de clasă și interacțiunea](#epic-2-sesiunea-de-clasă-și-interacțiunea)
