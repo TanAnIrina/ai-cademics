@@ -8,39 +8,8 @@ grades, journals and prompt-compliance evals unfold in real time. Teachers
 configure the subject and pacing; students take a seat; everyone else watches and
 chats.
 
-This is a full-stack rebuild (v2) of the original AI-cademics simulation. The core
-classroom — its prompts, phase rhythm and emotion model — is preserved and wrapped
-in a real product: accounts and roles, a live web UI, automated agent evaluations,
-a session archive, Docker delivery and CI/CD.
-
 > 📄 A complete write-up of the architecture and every change lives in
 > [`docs/AI-cademics_Change_Report.pdf`](docs/AI-cademics_Change_Report.pdf).
-
----
-
-## 📋 Cerințe proiect — checklist (pentru evaluare)
-
-### A. Implementarea
-
-| Cerință | Unde se găsește |
-|---------|-----------------|
-| Live demo | Scenariu pas-cu-pas în [`docs/DEMO.md`](docs/DEMO.md); deploy public pe domeniu cu HTTPS în [`docs/DEPLOY.md`](docs/DEPLOY.md) |
-| **Minim 2 agenți AI** în funcționalitate (modele de limbaj mici, locale) | **3 agenți**: 1 profesor + 2 studenți, rulabili pe modele locale mici prin Ollama (`llama3`, `qwen2`) — vezi [`docs/DEMO.md`](docs/DEMO.md) și [Self-hosted agents](#-self-hosted-agents) |
-| Demo offline (screencast / YouTube) | Link + instrucțiuni în [`docs/DEMO.md`](docs/DEMO.md#demo-offline-screencast) |
-
-### B. Procesul de dezvoltare software cu AI
-
-| Cerință | Punctaj | Unde se găsește |
-|---------|---------|-----------------|
-| User stories (minim 10) + backlog | 2 pct | [`docs/BACKLOG.md`](docs/BACKLOG.md) — 32 user stories pe 8 epics + tabel de backlog (MoSCoW, story points, status) |
-| Diagrame (UML, arhitectură, workflowuri) | 1 pct | [`docs/DIAGRAMS.md`](docs/DIAGRAMS.md) — 6 diagrame Mermaid: componente, clase, stări, 2× secvență, CI/CD |
-| Source control cu git (branches, merge, PRs, ≥5 commits/student) | 1 pct | [`docs/GIT_WORKFLOW.md`](docs/GIT_WORKFLOW.md) — 11 branch-uri, 5 PR-uri documentate, statistici commits/student |
-| Teste automate (inclusiv evals pentru agenți) | 2 pct | [`docs/TESTING.md`](docs/TESTING.md) — 61 teste pytest + evals deterministe per agent, rulate în CI |
-| Raportare bug + rezolvare cu pull request | 1 pct | [`docs/BUG_REPORTS.md`](docs/BUG_REPORTS.md) — 3 bug-uri documentate cu PR-uri + template de issue |
-| Pipeline CI/CD | 1 pct | [`.github/workflows/ci.yml`](.github/workflows/ci.yml) (lint + teste + build) și [`deploy.yml`](.github/workflows/deploy.yml) (imagini Docker + deploy opțional pe VPS) |
-| Raport despre folosirea toolurilor AI | 2 pct | [`docs/AI_USAGE_REPORT.md`](docs/AI_USAGE_REPORT.md) — pe fiecare etapă, cu prompturi, limite și lecții |
-
----
 
 ## 📋 Product Backlog
 
@@ -158,19 +127,6 @@ The backend seeds a few empty demo classrooms on first start. Sign in as a teach
 to set a subject and student count, then as students (or point self-hosted agents at
 the room) to fill the seats and watch the session begin. With the default **mock**
 provider you need no API keys at all.
-
-### Option C — Deploy public pe un domeniu (HTTPS automat)
-
-Pentru a face aplicația accesibilă pe internet, pe un domeniu, cu certificat HTTPS
-automat (Let's Encrypt via Caddy):
-
-```bash
-cp .env.prod.example .env.prod        # setează DOMAIN și ACME_EMAIL
-docker compose --env-file .env.prod -f docker-compose.prod.yml up -d --build
-```
-
-Ghidul complet (DNS, droplet, firewall, deploy automat din GitHub) este în
-[`docs/DEPLOY.md`](docs/DEPLOY.md).
 
 ---
 
@@ -319,10 +275,3 @@ Everything is environment-driven (prefix `AICADEMICS_`). See `.env.example`:
 | `AICADEMICS_SCHEDULER` | `1` | Background ticker that starts scheduled rooms (set `0` to disable) |
 | `AICADEMICS_TIME_SCALE` | `1.0` | Real-time multiplier for the lesson/break (a 20-min sprint ≈ 20 min; lower to compress demos, tests use `0`) |
 | `AICADEMICS_SUBJECT_CHOICE_SECONDS` | `180` | How long the engine waits between sprints for the teacher to pick the next subject before keeping the current one (`0` = don't pause) |
-
----
-
-## 📜 License & origin
-
-Rebuilt from [github.com/bbiAncah/ai-cademics](https://github.com/bbiAncah/ai-cademics).
-Original agent scripts are preserved under `backend/legacy/`.
