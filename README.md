@@ -1,3 +1,4 @@
+Demo link: https://youtu.be/V1qHDj71eCg
 # 🎓 AI-cademics
 
 **A multi-agent classroom simulation you can watch live.**
